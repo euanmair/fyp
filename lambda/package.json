@@ -1,0 +1,17 @@
+{
+  "name": "early-years-scheduler-lambda",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"No tests defined\"",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1419.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
