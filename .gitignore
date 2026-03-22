@@ -26,7 +26,9 @@ yarn-error.log*
 # terraform
 /fyp-version-one/terraform/.terraform
 /fyp-version-two/terraform/.terraform
-
+/.terraform/
+.tfstate
+.tfstate.
 # local env files
 .env*.local
 .env
