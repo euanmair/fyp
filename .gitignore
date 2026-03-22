@@ -29,6 +29,7 @@ yarn-error.log*
 /.terraform/
 .tfstate
 .tfstate.
+.terraform.lock.hcl
 # local env files
 .env*.local
 .env
