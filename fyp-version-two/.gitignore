@@ -1,8 +1,14 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
 # dependencies
 /node_modules
 /.pnp
-.pnp.js
-/app
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 
 # testing
 /coverage
@@ -22,14 +28,10 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.pnpm-debug.log*
 
-# terraform
-/fyp-version-one/terraform/.terraform
-/fyp-version-two/terraform/.terraform
-
-# local env files
-.env*.local
-.env
+# env files (can opt-in for committing if needed)
+.env*
 
 # vercel
 .vercel
@@ -37,9 +39,3 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-/lambda/dist/*
-/lambda/node_modules/*
-/lambda/src/*
-/fyp-version-one/lambda/*
-/fyp-version-two/lambda/*
-
