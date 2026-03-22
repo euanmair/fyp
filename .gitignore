@@ -35,4 +35,5 @@ next-env.d.ts
 /lambda/dist/*
 /lambda/node_modules/*
 /lambda/src/*
+/fyp-version-one/lambda/*
 
