@@ -10,3 +10,8 @@ variable "s3_bucket_name" {
   type        = string
   default     = "fyp-early-years-scheduler-2026"
 }
+
+variable "my_pub_ip" {
+  description = "Your public IP address for SSH access to EC2 instance"
+  type        = string
+}

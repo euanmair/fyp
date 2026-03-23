@@ -1,3 +1,6 @@
+# Ignore previous versions
+/fyp-version-one/*
+
 # dependencies
 /node_modules
 /.pnp
@@ -30,6 +33,11 @@ yarn-error.log*
 .tfstate
 .tfstate.
 .terraform.lock.hcl
+.secrets.tfvars
+/fyp-version-two/terraform/.ssh/euPubKey.pub
+/fyp-version-two/terraform/secrets.tfvars
+/fyp-version-two/terraform/terraform.tf*
+
 # local env files
 .env*.local
 .env
