@@ -70,7 +70,7 @@ resource "aws_instance" "app_server" {
 
     [Service]
     WorkingDirectory=/opt/app/fyp-version-two
-    ExecStart=/usr/bin/env HOST=127.0.01 PORT=3000 npm runstart
+    ExecStart=/usr/bin/env HOST=127.0.0.1 PORT=3000 npm run start
     Restart=always
     User=ec2-user
     Environment=NODE_ENV=development
