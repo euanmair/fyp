@@ -22,7 +22,7 @@ data "aws_ami" "redhat" {
 resource "aws_instance" "app_server" {
   # EC2 Instance Parameters
   ami           = data.aws_ami.redhat.id
-  instance_type = "t3.micro"
+  instance_type = "m7i-flex.large" # 2 vCPUs, 8 GiB RAM
 
   tags = {
     Name        = "AppServer"
@@ -38,11 +38,20 @@ resource "aws_instance" "app_server" {
     cpu_credits = "standard"
   }
 
+  # Define storage
+  root_block_device {
+    volume_size = 30 #GiB
+    volume_type = "gp3"
+    encrypted = false
+  }
+
   # Bash script to install all necessary dependencies on the EC2 instance.
   # Clones GIT repository, starts application. 
   user_data = <<-EOF
-    #!/bin/bash
-    
+    #!/bin/bash -ex
+    # Redirect all output to a log file and also to the console for debugging
+    exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1 
+
     # Treat all errors as fatal and print each command before executing it
     set -eux
 
@@ -63,6 +72,7 @@ resource "aws_instance" "app_server" {
     npm run build
 
     # Create systemd service that points to this service. This will ensure the app starts on boot and restarts if it crashes.
+    # This is done by writing all text below into nodeapp.service, until the SERVICE tag.
     cat >/etc/systemd/system/nodeapp.service <<SERVICE
     [Unit]
     Description=Next.js Web Application
@@ -82,6 +92,19 @@ resource "aws_instance" "app_server" {
     systemctl daemon-reload
     systemctl enable nodeapp
     systemctl start nodeapp
+
+    # Set perms for app dir /opt/app/fyp-version-two
+    chown ec2-user:ec2-user -R /opt/app/fyp-version-two
+    chmod 644 -R /opt/app/fyp-version-two
+
+    cat <<CRON >/etc/cron.d/repo-sync
+    * * * * * ec2-user cd /opt/app/fyp-version-two && /usr/bin/git pull origin main >> /var/log/repo-sync.log 2>&1
+    CRON
+
+    # Enabling & Restarting cron
+    systemctl enable crond
+    systemctl restart crond
+
   EOF
 }
 
