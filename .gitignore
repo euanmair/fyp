@@ -1,5 +1,7 @@
 # Ignore previous versions
 /fyp-version-one/*
+/temp_recourses/*
+/temp_resources/
 
 # dependencies
 /node_modules
@@ -25,6 +27,7 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+/fyp-version-two/myReadMe.md
 
 # terraform
 /fyp-version-one/terraform/.terraform

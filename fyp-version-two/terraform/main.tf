@@ -22,7 +22,7 @@ data "aws_ami" "redhat" {
 resource "aws_instance" "app_server" {
   # EC2 Instance Parameters
   ami           = data.aws_ami.redhat.id
-  instance_type = "m7i-flex.large" # 2 vCPUs, 8 GiB RAM
+  instance_type = "m7i-flex.large" # 2 vCPUs, 8 GiB RAM - £0.4 per/hour EU-NORTH-1
 
   tags = {
     Name        = "AppServer"
@@ -95,10 +95,10 @@ resource "aws_instance" "app_server" {
 
     # Set perms for app dir /opt/app/fyp-version-two
     chown ec2-user:ec2-user -R /opt/app/fyp-version-two
-    chmod 644 -R /opt/app/fyp-version-two
+    # chmod 644 -R /opt/app/fyp-version-two
 
     cat <<CRON >/etc/cron.d/repo-sync
-    * * * * * ec2-user cd /opt/app/fyp-version-two && /usr/bin/git pull origin main >> /var/log/repo-sync.log 2>&1
+    * * * * *  cd /opt/app/fyp-version-two && /usr/bin/git pull origin main >> /var/log/repo-sync.log 2>&1
     CRON
 
     # Enabling & Restarting cron
