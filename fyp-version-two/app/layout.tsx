@@ -2,6 +2,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import Link from "next/link";
 
 // Set CSS custom properties for the fonts, so they can be used in the app.
 const geistSans = Geist({
@@ -31,7 +32,15 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">{children}
+        <header className="p-4 border-b">
+          <nav className="flex gap-4">
+            <Link href="/">Home</Link>
+            <Link href="/dashboard">Dashboard</Link>
+            <Link href="/login">Login</Link>
+          </nav>
+        </header>
+      </body>
     </html>
   );
 }

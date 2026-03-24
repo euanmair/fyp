@@ -97,8 +97,9 @@ resource "aws_instance" "app_server" {
     chown ec2-user:ec2-user -R /opt/app/fyp-version-two
     # chmod 644 -R /opt/app/fyp-version-two
 
+    # Below cronjob is now confirmed working - Euan Mair 24/03/2026
     cat <<CRON >/etc/cron.d/repo-sync
-    * * * * *  cd /opt/app/fyp-version-two && /usr/bin/git pull origin main >> /var/log/repo-sync.log 2>&1
+    */5 * * * * root cd /opt/app/fyp-version-two && /usr/bin/git pull origin main && npm install && npm run build && systemctl restart nodeapp.service >> /var/log/repo-sync.log 2>&1
     CRON
 
     # Enabling & Restarting cron
