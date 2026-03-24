@@ -15,8 +15,6 @@
 # next.js
 /.next/
 /out/
-/fyp-version-two/package-lock.json
-/fyp-version-two/package.json
 
 # production
 /build
