@@ -1,6 +1,6 @@
 'use client'; // This directive tells Next.js this is a client component, allowing use of React hooks and browser APIs
 
-import { useState, FormEvent } from 'react'; // React hook for managing component state
+import { useState } from 'react'; // React hook for managing component state
 import { loginUser } from './actions'; // Import the server action for handling login logic
 
 // Main component for the login page - exported as default for Next.js routing
@@ -44,83 +44,77 @@ export default function LoginPage() {
   };
 
   // JSX return - defines the UI structure of the login page
+  // Uses the default layout colors: background/foreground CSS variables
   return (
-    // Main container with full height, centered content, and responsive padding
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      {/* Form container with max width and vertical spacing */}
-      <div className="max-w-md w-full space-y-8">
-        {/* Header section with title */}
+    // Main container using the default layout styling (min-h-screen handled by body)
+    <div className="flex flex-col items-center justify-center py-16 px-4">
+      {/* Form container with default layout colors */}
+      <div className="w-full max-w-sm space-y-6">
+        {/* Title section */}
         <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Sign in to your account
-          </h2>
+          <h1 className="text-2xl font-bold">Sign in to your account</h1>
         </div>
 
         {/* Login form with submit handler */}
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {/* Input fields container with rounded corners and shadow */}
-          <div className="rounded-md shadow-sm -space-y-px">
-            {/* Email input field */}
-            <div>
-              <label htmlFor="email" className="sr-only">
-                Email address
-              </label>
-              <input
-                id="email" // Links label to input for accessibility
-                name="email" // Form field name
-                type="email" // Input type for validation and mobile keyboard
-                autoComplete="email" // Browser autocomplete hint
-                required // HTML5 validation - field must be filled
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                placeholder="Email address" // Placeholder text
-                value={email} // Controlled input value
-                onChange={(e) => setEmail(e.target.value)} // Update state on change
-              />
-            </div>
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          {/* Email input field */}
+          <div className="space-y-2">
+            <label htmlFor="email" className="block text-sm font-medium">
+              Email address
+            </label>
+            <input
+              id="email" // Links label to input for accessibility
+              name="email" // Form field name
+              type="email" // Input type for validation and mobile keyboard
+              autoComplete="email" // Browser autocomplete hint
+              required // HTML5 validation - field must be filled
+              className="w-full px-3 py-2 border border-foreground/20 rounded-md bg-background text-foreground placeholder:text-foreground/50 focus:outline-none focus:ring-2 focus:ring-foreground/30"
+              placeholder="Enter your email" // Placeholder text
+              value={email} // Controlled input value
+              onChange={(e) => setEmail(e.target.value)} // Update state on change
+            />
+          </div>
 
-            {/* Password input field */}
-            <div>
-              <label htmlFor="password" className="sr-only">
-                Password
-              </label>
-              <input
-                id="password" // Links label to input for accessibility
-                name="password" // Form field name
-                type="password" // Input type hides password characters
-                autoComplete="current-password" // Browser autocomplete hint
-                required // HTML5 validation - field must be filled
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                placeholder="Password" // Placeholder text
-                value={password} // Controlled input value
-                onChange={(e) => setPassword(e.target.value)} // Update state on change
-              />
-            </div>
+          {/* Password input field */}
+          <div className="space-y-2">
+            <label htmlFor="password" className="block text-sm font-medium">
+              Password
+            </label>
+            <input
+              id="password" // Links label to input for accessibility
+              name="password" // Form field name
+              type="password" // Input type hides password characters
+              autoComplete="current-password" // Browser autocomplete hint
+              required // HTML5 validation - field must be filled
+              className="w-full px-3 py-2 border border-foreground/20 rounded-md bg-background text-foreground placeholder:text-foreground/50 focus:outline-none focus:ring-2 focus:ring-foreground/30"
+              placeholder="Enter your password" // Placeholder text
+              value={password} // Controlled input value
+              onChange={(e) => setPassword(e.target.value)} // Update state on change
+            />
           </div>
 
           {/* Error message display - only shows when error exists */}
           {error && (
-            <div className="text-red-600 text-sm text-center">
+            <div className="p-3 rounded-md bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 text-sm">
               {error}
             </div>
           )}
 
           {/* Submit button */}
-          <div>
-            <button
-              type="submit" // Button type for form submission
-              disabled={isLoading} // Disable when loading to prevent double submission
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {/* Dynamic button text based on loading state */}
-              {isLoading ? 'Signing in...' : 'Sign in'}
-            </button>
-          </div>
+          <button
+            type="submit" // Button type for form submission
+            disabled={isLoading} // Disable when loading to prevent double submission
+            className="w-full py-2 px-4 rounded-md bg-foreground text-background font-medium hover:bg-foreground/90 focus:outline-none focus:ring-2 focus:ring-foreground/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {/* Dynamic button text based on loading state */}
+            {isLoading ? 'Signing in...' : 'Sign in'}
+          </button>
 
           {/* Forgot password link */}
           <div className="text-center">
             <a
               href="/forgot-password" // Link to password reset page
-              className="font-medium text-indigo-600 hover:text-indigo-500"
+              className="text-sm text-foreground/60 hover:text-foreground"
             >
               Forgot your password?
             </a>

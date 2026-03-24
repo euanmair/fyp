@@ -1,0 +1,68 @@
+// Import NextRequest and NextResponse from Next.js server module for middleware handling
+import { NextRequest, NextResponse } from "next/server";
+
+// Import jwtVerify from jose library for JWT token verification
+import { jwtVerify } from "jose";
+
+// Helper function to extract and verify JWT token from request cookies
+// Returns the token payload if valid, or null if token doesn't exist or is invalid
+async function getToken(request: NextRequest) {
+  // Extract the "auth-token" cookie value from the request
+  const cookie = request.cookies.get("auth-token")?.value;
+  
+  // Return null if no cookie exists
+  if (!cookie) return null;
+  
+  try {
+    // Convert JWT_SECRET environment variable to Uint8Array format required by jose
+    const secret = new TextEncoder().encode(process.env.JWT_SECRET);
+    
+    // Verify the JWT token using the secret - will throw error if invalid or expired
+    const { payload } = await jwtVerify(cookie, secret);
+    
+    // Return the decoded payload containing user data (userId, email, etc.)
+    return payload;
+  } catch {
+    // If verification fails (invalid signature, expired, etc.), return null
+    return null;
+  }
+}
+
+// Main middleware function that runs on every request to protected routes
+// Handles authentication logic and route protection
+export async function middleware(request: NextRequest) {
+  // Get the JWT token from cookies and verify it
+  const token = await getToken(request);
+
+  // Check if the current request is for the login page
+  const isAuthPage = request.nextUrl.pathname.startsWith("/login");
+
+  // If user IS logged in and tries to access login page, redirect to dashboard
+  // This prevents authenticated users from seeing the login page
+  if (token && isAuthPage) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
+  // Check if the current request is for a protected route (dashboard)
+  const isProtectedRoute = request.nextUrl.pathname.startsWith("/dashboard");
+
+  // If user is NOT logged in and tries to access protected route, redirect to login
+  // This enforces authentication requirement for dashboard
+  if (!token && isProtectedRoute) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  // If none of the redirect conditions are met, allow request to proceed normally
+  return NextResponse.next();
+}
+
+// Configuration object that specifies which routes the middleware should run on
+// Uses regex pattern to match all routes EXCEPT api routes, Next.js internal resources, and favicon
+export const config = {
+  // Matcher pattern that excludes:
+  // - /api/* (API routes don't need auth middleware)
+  // - /_next/static/* (Static Next.js assets)
+  // - /_next/image/* (Next.js image optimization)
+  // - /favicon.ico (Favicon request)
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+};

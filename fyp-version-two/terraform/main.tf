@@ -22,7 +22,8 @@ data "aws_ami" "redhat" {
 resource "aws_instance" "app_server" {
   # EC2 Instance Parameters
   ami           = data.aws_ami.redhat.id
-  instance_type = "m7i-flex.large" # 2 vCPUs, 8 GiB RAM - £0.4 per/hour EU-NORTH-1
+  # instance_type = "m7i-flex.large" # 2 vCPUs, 8 GiB RAM - $0.13 per/hour EU-NORTH-1
+  instance_type = "t3.small" # 2 vCPUs, 2 GiB RAM - $0.0504 p/h EU-NORTH-1
 
   tags = {
     Name        = "AppServer"
