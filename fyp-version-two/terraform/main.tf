@@ -7,6 +7,74 @@ provider "aws" {
   region = "eu-north-1"
 }
 
+# --------------------------------------
+# DynamoDB
+# --------------------------------------
+# DynamoDB table to store nursery schedules. Using on-demand billing for cost efficiency during development.
+resource "aws_dynamodb_table" "NurserySchedules" {
+  name           = "NurserySchedules"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "ScheduleID"
+
+  attribute {
+    name = "scheduleID"
+    type = "S"
+  }
+
+  tags = {
+    Environment = "development"
+    Owner       = "Euan"
+    Application = "NurseryScheduleApp"
+  }
+}
+
+# DynamoDB table to store history of schedule changes. This allows us to track changes over time and potentially implement features like undo or audit logs.
+resource "aws_dynamodb_table" "NurseryScheduleHistory" {
+  name           = "NurseryScheduleHistory"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "HistoryID"
+
+  attribute {
+    name = "historyID"
+    type = "S"
+  }
+
+  tags = {
+    Environment = "development"
+    Owner       = "Euan"
+    Application = "NurseryScheduleApp"
+  }  
+}
+
+# IAM 
+resource "aws_iam_role_policy" "lambda_dynamodb_policy" {
+  name = "lambda-dynamodb-policy"
+  role = aws_iam_role.lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:PutItem",
+          "dynamodb:GetItem",
+          "dynamodb:Query"
+        ]
+        Resource = [
+          aws_dynamodb_table.nursery_schedules.arn,
+          aws_dynamodb_table.nursery_schedule_history.arn,
+          "${aws_dynamodb_table.nursery_schedule_history.arn}/index/*"
+        ]
+      }
+    ]
+  })
+}
+
+# --------------------------------------
+# EC2
+# --------------------------------------
+
 # Fetch latest RedHat AMI
 data "aws_ami" "redhat" {
   most_recent = true

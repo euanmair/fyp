@@ -48,6 +48,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# lambda
+/fyp-version-two/terraform/lambda/index.mjs
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
