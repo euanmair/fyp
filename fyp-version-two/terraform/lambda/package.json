@@ -1,0 +1,11 @@
+{
+  "name": "nursery-scheduler-lambda",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.908.0",
+    "ajv": "^8.17.1",
+    "uuid": "^11.1.0"
+  }
+}

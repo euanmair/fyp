@@ -40,6 +40,8 @@ yarn-error.log*
 /fyp-version-two/terraform/.ssh/euPubKey.pub
 /fyp-version-two/terraform/secrets.tfvars
 /fyp-version-two/terraform/terraform.tf*
+/fyp-version-two/terraform/lambda/node_modules
+/fyp-version-two/terraform/lambda/events
 
 # local env files
 .env*.local

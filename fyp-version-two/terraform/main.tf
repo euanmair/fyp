@@ -4,7 +4,7 @@
 # --------------------------------------
 
 provider "aws" {
-  region = "eu-north-1"
+  region = var.aws_region
 }
 
 # --------------------------------------
@@ -14,7 +14,7 @@ provider "aws" {
 resource "aws_dynamodb_table" "NurserySchedules" {
   name           = "NurserySchedules"
   billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "ScheduleID"
+  hash_key       = "scheduleID"
 
   attribute {
     name = "scheduleID"
@@ -32,7 +32,7 @@ resource "aws_dynamodb_table" "NurserySchedules" {
 resource "aws_dynamodb_table" "NurseryScheduleHistory" {
   name           = "NurseryScheduleHistory"
   billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "HistoryID"
+  hash_key       = "historyID"
 
   attribute {
     name = "historyID"
@@ -44,6 +44,38 @@ resource "aws_dynamodb_table" "NurseryScheduleHistory" {
     Owner       = "Euan"
     Application = "NurseryScheduleApp"
   }  
+}
+
+# Package the Lambda source directory, including dependencies installed in terraform/lambda/node_modules.
+data "archive_file" "scheduler_lambda_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda"
+  output_path = "${path.module}/lambda/scheduler_lambda.zip"
+  excludes    = ["events", "package-lock.json"]
+}
+
+# Execution role assumed by the nursery scheduling Lambda function.
+resource "aws_iam_role" "lambda_role" {
+  name = "nursery-scheduler-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+# Attach the standard CloudWatch Logs permissions required by Lambda.
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 # IAM 
@@ -62,13 +94,38 @@ resource "aws_iam_role_policy" "lambda_dynamodb_policy" {
           "dynamodb:Query"
         ]
         Resource = [
-          aws_dynamodb_table.nursery_schedules.arn,
-          aws_dynamodb_table.nursery_schedule_history.arn,
-          "${aws_dynamodb_table.nursery_schedule_history.arn}/index/*"
+          aws_dynamodb_table.NurserySchedules.arn,
+          aws_dynamodb_table.NurseryScheduleHistory.arn,
+          "${aws_dynamodb_table.NurseryScheduleHistory.arn}/index/*"
         ]
       }
     ]
   })
+}
+
+# Nursery scheduling Lambda function.
+resource "aws_lambda_function" "nursery_scheduler" {
+  function_name    = var.lambda_function_name
+  role             = aws_iam_role.lambda_role.arn
+  runtime          = "nodejs20.x"
+  handler          = "index_prod.handler"
+  filename         = data.archive_file.scheduler_lambda_zip.output_path
+  source_code_hash = data.archive_file.scheduler_lambda_zip.output_base64sha256
+  timeout          = 30
+  memory_size      = 512
+
+  environment {
+    variables = {
+      SCHEDULE_TABLE_NAME      = aws_dynamodb_table.NurserySchedules.name
+      STAGE_HISTORY_TABLE_NAME = aws_dynamodb_table.NurseryScheduleHistory.name
+      PERSIST_SCHEDULES        = tostring(var.persist_schedules)
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_basic_execution,
+    aws_iam_role_policy.lambda_dynamodb_policy
+  ]
 }
 
 # --------------------------------------
