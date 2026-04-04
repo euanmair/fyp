@@ -1,11 +1,13 @@
 // AWS SDK modules for DynamoDB interaction and UUID generation for unique IDs
-import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, PutItemCommand, GetItemCommand } from "@aws-sdk/client-dynamodb";
 import { v4 as uuidv4 } from "uuid";
 import Ajv from "ajv";
 
 // Table names
 const dynamoTable = process.env.SCHEDULE_TABLE_NAME || "NurserySchedules";
 const historyTable = process.env.STAGE_HISTORY_TABLE_NAME || "NurseryScheduleHistory";
+// Config table stores the nursery's default staff, settings and children counts so the function can run without a full payload.
+const configTable = process.env.CONFIG_TABLE_NAME || "NurseryConfig";
 const shouldPersistByDefault = process.env.PERSIST_SCHEDULES === "true";
 
 // Ajv validator setup for strict schema validation
@@ -184,15 +186,38 @@ function buildStaffingRatios(childrenCount, providedRatios = {}) {
 export const handler = async (event) => {
     try {
         // Accept either direct Lambda invocation payloads or API Gateway proxy events.
-        const payload = parseEventPayload(event);
+        const rawPayload = parseEventPayload(event);
+
+        // Extract the config identifier before AJV strips unknown keys via removeAdditional.
+        const configID = rawPayload?.configID ?? "default";
+
+        // If any required fields are absent, attempt to load the nursery's saved config from DynamoDB
+        // so the function can operate without a full payload being supplied every time.
+        const isMissingRequiredFields = !rawPayload?.staff || !rawPayload?.settings || !rawPayload?.childrenCount;
+        const storedConfig = isMissingRequiredFields ? await fetchStoredConfig(configID) : null;
+
+        // Merge: stored config provides baseline values; raw request fields take precedence.
+        const payload = mergeWithStoredConfig(rawPayload, storedConfig);
 
         // Fail fast on malformed requests before any scheduling work begins.
         const isValid = validateSchedule(payload);
         if (!isValid) {
             return createJsonResponse(400, {
-                message: "Invalid schedule input.",
+                message: storedConfig
+                    ? "Invalid schedule input. Stored nursery config was merged but the combined data failed validation."
+                    : "Invalid schedule input. No stored config found and the request is incomplete.",
                 errors: formatAjvErrors(validateSchedule.errors)
             });
+        }
+
+        // If the caller sets updateConfig:true, save this payload as the new default config for future calls.
+        // Wrapped in its own try/catch so a failed write does not abort the schedule response.
+        if (payload?.settings?.updateConfig === true) {
+            try {
+                await saveNurseryConfig(configID, payload);
+            } catch (saveErr) {
+                console.warn("Could not save nursery config to DynamoDB:", saveErr?.message);
+            }
         }
 
         const result = generateSchedule(payload);
@@ -204,7 +229,10 @@ export const handler = async (event) => {
         }
 
         return createJsonResponse(200, {
-            message: "Schedule generated successfully.",
+            message: storedConfig
+                ? "Schedule generated successfully using stored nursery config."
+                : "Schedule generated successfully.",
+            configSource: storedConfig ? "dynamodb" : "request",
             result,
             persistence
         });
@@ -220,17 +248,21 @@ export const handler = async (event) => {
 };
 
 function parseEventPayload(event) {
-    if (!event) {
-        throw new Error("Missing Lambda event payload.");
-    }
+    // Return an empty object for null/undefined events so the handler can fall back to stored config.
+    if (!event) return {};
 
     if (typeof event.body === "string") {
-        return JSON.parse(event.body);
+        // Empty or whitespace-only body is treated as no input rather than a parse error.
+        const trimmed = event.body.trim();
+        return trimmed ? JSON.parse(trimmed) : {};
     }
 
     if (event.body && typeof event.body === "object") {
         return event.body;
     }
+
+    // API Gateway events with a null body (no Content-Type / empty POST) are treated as no input.
+    if ("httpMethod" in event || "requestContext" in event || "version" in event) return {};
 
     return event;
 }
@@ -348,6 +380,81 @@ function marshallValue(value) {
 
     return { S: String(value) };
 }
+
+// ─── Nursery Config persistence (DynamoDB read/write) ────────────────────────
+
+async function fetchStoredConfig(configID) {
+    // Retrieve the nursery's saved configuration from DynamoDB so the scheduler can
+    // run without requiring a full payload on every request.
+    try {
+        const result = await dynamoClient.send(new GetItemCommand({
+            TableName: configTable,
+            Key: { configID: { S: configID } }
+        }));
+        if (!result.Item) return null;
+        return unmarshallConfig(result.Item);
+    } catch (err) {
+        // A failed read should not crash the function – fall through to validation,
+        // which will return a 400 if the request is also incomplete.
+        console.warn("Could not fetch stored nursery config from DynamoDB:", err?.message);
+        return null;
+    }
+}
+
+async function saveNurseryConfig(configID, config) {
+    // Persist the nursery configuration so future calls without a full payload can
+    // use it as the baseline.  Only the four scheduling-relevant fields are stored.
+    const record = {
+        configID,
+        updatedAt: new Date().toISOString(),
+        rooms: config.rooms ?? [],
+        staff: config.staff,
+        settings: config.settings,
+        childrenCount: config.childrenCount
+    };
+    await dynamoClient.send(new PutItemCommand({
+        TableName: configTable,
+        Item: marshallSimpleRecord(record)
+    }));
+}
+
+function mergeWithStoredConfig(rawPayload, stored) {
+    // If no stored config exists, the raw payload is used as-is and will be validated below.
+    if (!stored) return rawPayload ?? {};
+    return {
+        // Stored config provides the baseline; any keys supplied in the request override it.
+        rooms: rawPayload?.rooms ?? stored?.rooms ?? [],
+        staff: rawPayload?.staff ?? stored?.staff,
+        settings: {
+            ...(stored?.settings ?? {}),
+            ...(rawPayload?.settings ?? {})
+        },
+        childrenCount: rawPayload?.childrenCount ?? stored?.childrenCount
+    };
+}
+
+function unmarshallConfig(dynamoItem) {
+    // Convert a raw DynamoDB attribute map back into a plain JavaScript object.
+    const result = {};
+    for (const [key, typedValue] of Object.entries(dynamoItem)) {
+        result[key] = unmarshallValue(typedValue);
+    }
+    return result;
+}
+
+function unmarshallValue(typedValue) {
+    // Convert a single DynamoDB typed attribute value to a plain JavaScript value.
+    // Arrays and objects were stored as JSON strings by marshallValue, so attempt a parse.
+    if (typedValue.NULL) return null;
+    if (typedValue.BOOL !== undefined) return typedValue.BOOL;
+    if (typedValue.N !== undefined) return Number(typedValue.N);
+    if (typedValue.S !== undefined) {
+        try { return JSON.parse(typedValue.S); } catch { return typedValue.S; }
+    }
+    return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function generateShiftLength(dayStart, dayEnd) {
     // This function will generate shifts based on the provided start and end times.

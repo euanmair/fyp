@@ -46,6 +46,25 @@ resource "aws_dynamodb_table" "NurseryScheduleHistory" {
   }  
 }
 
+# DynamoDB table to store the nursery's default configuration (staff, settings, childrenCount, rooms).
+# The Lambda reads from this table when no full payload is supplied so it can run without input every time.
+resource "aws_dynamodb_table" "NurseryConfig" {
+  name           = "NurseryConfig"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "configID"
+
+  attribute {
+    name = "configID"
+    type = "S"
+  }
+
+  tags = {
+    Environment = "development"
+    Owner       = "Euan"
+    Application = "NurseryScheduleApp"
+  }
+}
+
 # Package the Lambda source directory, including dependencies installed in terraform/lambda/node_modules.
 data "archive_file" "scheduler_lambda_zip" {
   type        = "zip"
@@ -96,7 +115,8 @@ resource "aws_iam_role_policy" "lambda_dynamodb_policy" {
         Resource = [
           aws_dynamodb_table.NurserySchedules.arn,
           aws_dynamodb_table.NurseryScheduleHistory.arn,
-          "${aws_dynamodb_table.NurseryScheduleHistory.arn}/index/*"
+          "${aws_dynamodb_table.NurseryScheduleHistory.arn}/index/*",
+          aws_dynamodb_table.NurseryConfig.arn
         ]
       }
     ]
@@ -118,6 +138,7 @@ resource "aws_lambda_function" "nursery_scheduler" {
     variables = {
       SCHEDULE_TABLE_NAME      = aws_dynamodb_table.NurserySchedules.name
       STAGE_HISTORY_TABLE_NAME = aws_dynamodb_table.NurseryScheduleHistory.name
+      CONFIG_TABLE_NAME        = aws_dynamodb_table.NurseryConfig.name
       PERSIST_SCHEDULES        = tostring(var.persist_schedules)
     }
   }
