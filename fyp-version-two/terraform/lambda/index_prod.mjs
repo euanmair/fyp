@@ -234,6 +234,16 @@ export const handler = async (event) => {
         }
 
         const result = generateSchedule(payload);
+
+        // Normalise staffHours to a flat { staffID: hours } map so consumers
+        // don't need to know which pool each member belongs to.
+        if (result.staffHours && typeof result.staffHours === "object") {
+            const sh = result.staffHours;
+            if (sh.practitioner || sh.office) {
+                result.staffHours = { ...(sh.practitioner || {}), ...(sh.office || {}) };
+            }
+        }
+
         const persistResult = payload?.settings?.persistResult ?? shouldPersistByDefault;
 
         let persistence = null;

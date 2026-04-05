@@ -52,7 +52,7 @@ export default function DashboardPage() {
   const [statusMessage, setStatusMessage] = useState<string>("Ready.");
   const [error, setError] = useState<string>("");
   const [lastPayload, setLastPayload] = useState<unknown>(null);
-  const [lastSchedule, setLastSchedule] = useState<{ assignments?: Assignment[]; staffHours?: Record<string, number> } | null>(null);
+  const [lastSchedule, setLastSchedule] = useState<{ assignments?: Assignment[]; staffHours?: Record<string, number | Record<string, number>> } | null>(null);
 
   const assignmentRows = useMemo(() => {
     const assignments = lastSchedule?.assignments || [];
@@ -66,7 +66,18 @@ export default function DashboardPage() {
   }, [lastSchedule]);
 
   const staffHoursRows = useMemo(() => {
-    const hours = lastSchedule?.staffHours || {};
+    const raw = lastSchedule?.staffHours || {};
+    // Flatten in case the scheduler returns { practitioner: {...}, office: {...} }
+    const hours: Record<string, number> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (typeof value === "number") {
+        hours[key] = value;
+      } else if (value && typeof value === "object") {
+        for (const [id, h] of Object.entries(value as Record<string, number>)) {
+          hours[id] = (hours[id] || 0) + h;
+        }
+      }
+    }
     return Object.entries(hours).sort((a, b) => b[1] - a[1]);
   }, [lastSchedule]);
 
