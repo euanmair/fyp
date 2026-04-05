@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 // Import jwtVerify from jose library for JWT token verification
 import { jwtVerify } from "jose";
 
+const jwtSecret = process.env.JWT_SECRET || "your-secret-key-change-in-production";
+
 // Helper function to extract and verify JWT token from request cookies
 // Returns the token payload if valid, or null if token doesn't exist or is invalid
 async function getToken(request: NextRequest) {
@@ -15,7 +17,7 @@ async function getToken(request: NextRequest) {
   
   try {
     // Convert JWT_SECRET environment variable to Uint8Array format required by jose
-    const secret = new TextEncoder().encode(process.env.JWT_SECRET);
+    const secret = new TextEncoder().encode(jwtSecret);
     
     // Verify the JWT token using the secret - will throw error if invalid or expired
     const { payload } = await jwtVerify(cookie, secret);

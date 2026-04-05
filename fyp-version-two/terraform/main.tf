@@ -141,6 +141,62 @@ resource "aws_iam_role_policy" "lambda_dynamodb_policy" {
   })
 }
 
+# Execution role assumed by the EC2 instance running the Next.js app.
+resource "aws_iam_role" "ec2_app_role" {
+  name = "nursery-app-ec2-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "ec2_app_policy" {
+  name = "nursery-app-ec2-policy"
+  role = aws_iam_role.ec2_app_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem"
+        ]
+        Resource = [
+          aws_dynamodb_table.NurseryUsers.arn
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:InvokeFunction"
+        ]
+        Resource = [
+          aws_lambda_function.nursery_scheduler.arn,
+          aws_lambda_function.nursery_config_get.arn,
+          aws_lambda_function.nursery_config_upsert.arn,
+          aws_lambda_function.nursery_config_patch.arn
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_instance_profile" "ec2_app_profile" {
+  name = "nursery-app-ec2-profile"
+  role = aws_iam_role.ec2_app_role.name
+}
+
 # Nursery scheduling Lambda function.
 resource "aws_lambda_function" "nursery_scheduler" {
   function_name    = var.lambda_function_name
@@ -277,6 +333,8 @@ resource "aws_instance" "app_server" {
 
   key_name = "euBusinessKey" # Ensure this key pair exists in the AWS account
 
+  iam_instance_profile = aws_iam_instance_profile.ec2_app_profile.name
+
   credit_specification {
     cpu_credits = "standard"
   }
@@ -342,7 +400,7 @@ resource "aws_instance" "app_server" {
 
     # Below cronjob is now confirmed working - Euan Mair 24/03/2026
     cat <<CRON >/etc/cron.d/repo-sync
-    */5 * * * * root cd /opt/app/fyp-version-two && /usr/bin/git pull origin main && npm install && npm run build && systemctl restart nodeapp.service >> /var/log/repo-sync.log 2>&1
+    */5 * * * * root cd /opt/app/fyp-version-two && /usr/bin/git fetch origin && /usr/bin/git reset --hard origin/main && npm install && npm run build && systemctl restart nodeapp.service >> /var/log/repo-sync.log 2>&1
     CRON
 
     # Enabling & Restarting cron
