@@ -2,7 +2,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Link from "next/link";
+import NavRail from "./nav-rail";
 
 // Set CSS custom properties for the fonts, so they can be used in the app.
 const geistSans = Geist({ 
@@ -32,18 +32,12 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
-        {/* Header appears on all pages */}
-        <header className="p-4 border-b">
-          <nav className="flex gap-4">
-            <Link href="/">Home</Link>
-            <Link href="/dashboard">Dashboard</Link>
-            <Link href="/login">Login</Link>
-          </nav>
-        </header>
-        
-        {/* Page content renders here */}
-        {children}
+      <body className="min-h-full bg-background text-foreground">
+        <NavRail />
+
+        <div className="min-h-full pl-10 md:pl-14">
+          {children}
+        </div>
       </body>
     </html>
   );
