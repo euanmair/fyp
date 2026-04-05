@@ -1163,7 +1163,7 @@ function optimizePoolAssignments(staffPool, slots, settings, poolName) {
     }
 
     if (!Array.isArray(staffPool) || staffPool.length === 0) {
-        throw new Error(`No ${poolName} staff available for required slots.`);
+        throw new Error(describeMissingPoolStaff(poolName, slots));
     }
 
     // Aim for an even spread of hours across the available pool.
@@ -1336,6 +1336,79 @@ function describeInitialAssignmentFailure(poolName, slot, slots, staffPool, stat
     return `${base} ${cover} ${roomCover} ${availability} ${blockers} ${needMore}`;
 }
 
+function describeMissingPoolStaff(poolName, slots) {
+    // Explain how many workers are needed at peak time when no pool staff are supplied.
+    const bySegment = new Map();
+    for (const slot of slots) {
+        const key = `${slot.week}|${slot.day}|${slot.segmentIndex}`;
+        bySegment.set(key, (bySegment.get(key) || 0) + 1);
+    }
+
+    let peakRequired = 0;
+    for (const count of bySegment.values()) {
+        if (count > peakRequired) {
+            peakRequired = count;
+        }
+    }
+
+    const nextStep = poolName === "practitioner"
+        ? `Add at least ${peakRequired} practitioners in the configuration, or reduce child counts/room demand.`
+        : `Add at least ${peakRequired} office staff in the configuration, or reduce office-room demand.`;
+
+    return `No ${poolName} staff available for required slots. Peak ${poolName} staff needed in a single segment: ${peakRequired}. ${nextStep}`;
+}
+
+function describePreferredShiftFailure(request, slots, state, maxShiftHours) {
+    // Explain why a preference could not be honoured and whether more staff are needed.
+    const preferredIndices = request.candidateIndices || [];
+    const matchingSlots = preferredIndices.length;
+
+    let alreadyTaken = 0;
+    let holidayBlocked = 0;
+    let occupiedBlocked = 0;
+    let shiftLimitBlocked = 0;
+    let assignableNow = 0;
+
+    for (const index of preferredIndices) {
+        if (state.assignments[index]) {
+            alreadyTaken += 1;
+            continue;
+        }
+
+        const slot = slots[index];
+        if (isStaffOnHoliday(request.member, slot.day, slot.week)) {
+            holidayBlocked += 1;
+            continue;
+        }
+
+        const occKey = `${slot.week}|${slot.day}|${slot.segmentIndex}`;
+        const occupied = state.occupancy[occKey];
+        if (occupied && occupied.has(request.member.staffID)) {
+            occupiedBlocked += 1;
+            continue;
+        }
+
+        if (Number.isFinite(maxShiftHours) && maxShiftHours > 0) {
+            const dayKey = `${slot.week}|${slot.day}|${request.member.staffID}`;
+            const dayHours = state.dayHoursByStaff[dayKey] || 0;
+            if ((dayHours + slot.hours) > maxShiftHours) {
+                shiftLimitBlocked += 1;
+                continue;
+            }
+        }
+
+        assignableNow += 1;
+    }
+
+    const who = request.member.staffName || request.member.staffID;
+    const base = `Could not satisfy preferred shift for ${who}: ${request.parsed.raw}.`;
+    const scope = `Matching slots for this preference: ${matchingSlots}.`;
+    const blockers = `Already taken: ${alreadyTaken}, blocked by holiday: ${holidayBlocked}, blocked by same-segment occupancy: ${occupiedBlocked}, blocked by maxShiftHours: ${shiftLimitBlocked}, assignable now: ${assignableNow}.`;
+    const help = "If this preference is mandatory, increase available staff or relax constraints (holidays, maxShiftHours, or competing preferences).";
+
+    return `${base} ${scope} ${blockers} ${help}`;
+}
+
 function preassignPreferredShifts(staffPool, slots, state, maxShiftHours) {
     // Gather all preference requests first so they can be processed in the most constrained order.
     const requests = [];
@@ -1385,9 +1458,7 @@ function preassignPreferredShifts(staffPool, slots, state, maxShiftHours) {
         }
 
         if (!assigned) {
-            throw new Error(
-                `Could not satisfy preferred shift for ${request.member.staffName || request.member.staffID}: ${request.parsed.raw}`
-            );
+            throw new Error(describePreferredShiftFailure(request, slots, state, maxShiftHours));
         }
     }
 }
