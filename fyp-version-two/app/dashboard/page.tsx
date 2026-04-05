@@ -34,7 +34,7 @@ const DEFAULT_CONFIG = {
     assignmentStrategy: "optimised",
     persistResult: false
   },
-  childrenCount: { "0-24": 9, "24-36": 14 }
+  childrenCount: { "0-24": 3, "24-36": 4 }
 };
 
 const DEFAULT_PATCH = {

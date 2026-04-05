@@ -1360,6 +1360,12 @@ function isSlotMatchPreference(slot, preference) {
         return true;
     }
 
+    // If the day is unsplit (single "full" segment), any time-of-day preference is satisfied
+    // — the staff member covers the whole day so "early", "mid", and "late" all apply.
+    if (slot.segmentLabel === "full") {
+        return true;
+    }
+
     return slot.segmentLabel === preference.label;
 }
 
