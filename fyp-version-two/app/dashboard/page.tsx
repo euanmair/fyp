@@ -79,7 +79,8 @@ export default function DashboardPage() {
 
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data?.message || data?.payload?.message || "Request failed");
+      const message = data?.payload?.error || data?.payload?.message || data?.message || "Request failed";
+      throw new Error(message);
     }
     return data;
   }

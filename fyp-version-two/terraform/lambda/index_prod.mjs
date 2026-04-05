@@ -252,10 +252,21 @@ export const handler = async (event) => {
     } catch (error) {
         console.error("Error processing schedule:", error);
 
-        const statusCode = error?.name === "SyntaxError" ? 400 : 500;
+        const message = String(error?.message || "Unknown error");
+        const isClientSideError = error?.name === "SyntaxError"
+            || message.includes("Invalid")
+            || message.includes("Missing")
+            || message.includes("Not enough")
+            || message.includes("Unable to assign")
+            || message.includes("must include")
+            || message.includes("requires");
+        const statusCode = isClientSideError ? 400 : 500;
+
         return createJsonResponse(statusCode, {
-            message: statusCode === 400 ? "Invalid JSON payload." : "Internal Server Error",
-            error: error?.message || "Unknown error"
+            message: statusCode === 400
+                ? (error?.name === "SyntaxError" ? "Invalid JSON payload." : message)
+                : "Internal Server Error",
+            error: message
         });
     }
 };
