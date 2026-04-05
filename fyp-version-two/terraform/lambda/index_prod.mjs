@@ -1192,9 +1192,7 @@ function optimizePoolAssignments(staffPool, slots, settings, poolName) {
         const slot = slots[i];
         const candidates = staffPool.filter((member) => canAssignToSlot(member, slot, state, maxShiftHours));
         if (candidates.length === 0) {
-            throw new Error(
-                `Unable to create initial ${poolName} assignment for ${slot.day} ${slot.start}-${slot.end} (${slot.roomName}).`
-            );
+            throw new Error(describeInitialAssignmentFailure(poolName, slot, slots, staffPool, state, maxShiftHours));
         }
 
         let best = null;
@@ -1272,6 +1270,70 @@ function optimizePoolAssignments(staffPool, slots, settings, poolName) {
         cost: bestScore.cost,
         fairnessPenalty: bestScore.fairnessPenalty
     };
+}
+
+function describeInitialAssignmentFailure(poolName, slot, slots, staffPool, state, maxShiftHours) {
+    // Build a clear diagnostic so users can see whether they need more staff or different constraints.
+    const segmentIndices = [];
+    for (let i = 0; i < slots.length; i += 1) {
+        const s = slots[i];
+        if (s.week === slot.week && s.day === slot.day && s.segmentIndex === slot.segmentIndex && s.isOffice === slot.isOffice) {
+            segmentIndices.push(i);
+        }
+    }
+
+    const roomIndices = segmentIndices.filter((index) => slots[index].roomID === slot.roomID);
+
+    const segmentRequired = segmentIndices.length;
+    const segmentAssigned = segmentIndices.filter((index) => !!state.assignments[index]).length;
+    const segmentMissing = Math.max(0, segmentRequired - segmentAssigned);
+
+    const roomRequired = roomIndices.length;
+    const roomAssigned = roomIndices.filter((index) => !!state.assignments[index]).length;
+    const roomMissing = Math.max(0, roomRequired - roomAssigned);
+
+    const occKey = `${slot.week}|${slot.day}|${slot.segmentIndex}`;
+    const occupied = state.occupancy[occKey] || new Set();
+
+    let holidayBlocked = 0;
+    let occupiedBlocked = 0;
+    let shiftLimitBlocked = 0;
+    let eligible = 0;
+
+    for (const member of staffPool) {
+        if (isStaffOnHoliday(member, slot.day, slot.week)) {
+            holidayBlocked += 1;
+            continue;
+        }
+
+        if (occupied.has(member.staffID)) {
+            occupiedBlocked += 1;
+            continue;
+        }
+
+        if (Number.isFinite(maxShiftHours) && maxShiftHours > 0) {
+            const dayKey = `${slot.week}|${slot.day}|${member.staffID}`;
+            const dayHours = state.dayHoursByStaff[dayKey] || 0;
+            if ((dayHours + slot.hours) > maxShiftHours) {
+                shiftLimitBlocked += 1;
+                continue;
+            }
+        }
+
+        eligible += 1;
+    }
+
+    const base = `Unable to create initial ${poolName} assignment for ${slot.day} ${slot.start}-${slot.end} (${slot.roomName}).`;
+    const cover = `${poolName} cover required this segment: ${segmentRequired}, already assigned: ${segmentAssigned}, still needed: ${segmentMissing}.`;
+    const roomCover = `${poolName} cover required for ${slot.roomName}: ${roomRequired}, already assigned: ${roomAssigned}, still needed: ${roomMissing}.`;
+    const availability = `Available ${poolName} staff in pool: ${staffPool.length}, eligible for this slot now: ${eligible}.`;
+    const blockers = `Blocked by holiday: ${holidayBlocked}, already assigned in this time segment: ${occupiedBlocked}, maxShiftHours limit: ${shiftLimitBlocked}.`;
+
+    const needMore = poolName === "practitioner"
+        ? "More practitioners are likely needed for this segment, or reduce child counts/ratios/room demand."
+        : "More office staff are likely needed for this segment, or reduce office-room demand.";
+
+    return `${base} ${cover} ${roomCover} ${availability} ${blockers} ${needMore}`;
 }
 
 function preassignPreferredShifts(staffPool, slots, state, maxShiftHours) {
