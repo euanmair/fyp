@@ -1,20 +1,24 @@
 'use client'; // This directive tells Next.js this is a client component, allowing use of React hooks and browser APIs
 
 import { useState } from 'react'; // React hook for managing component state
-import { loginUser } from './actions'; // Import the server action for handling login logic
+import { loginUser, registerUser } from './actions'; // Import server actions for handling auth logic
 
 // Main component for the login page - exported as default for Next.js routing
 export default function LoginPage() {
   // State variables to manage form data and UI state
   const [email, setEmail] = useState(''); // Stores the user's email input
   const [password, setPassword] = useState(''); // Stores the user's password input
+  const [confirmPassword, setConfirmPassword] = useState(''); // Stores confirm-password input for registration
   const [error, setError] = useState(''); // Stores any error messages to display
+  const [info, setInfo] = useState(''); // Stores non-error messages
   const [isLoading, setIsLoading] = useState(false); // Tracks if login request is in progress
+  const [mode, setMode] = useState<'login' | 'register'>('login');
 
   // Form submission handler - called when user submits the login form
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault(); // Prevent default form submission behavior (page reload)
     setError(''); // Clear any previous error messages
+    setInfo('');
     setIsLoading(true); // Set loading state to show spinner/button disabled
 
     try {
@@ -22,15 +26,19 @@ export default function LoginPage() {
       const formData = new FormData();
       formData.append('email', email); // Add email to form data
       formData.append('password', password); // Add password to form data
+      formData.append('confirmPassword', confirmPassword);
 
-      // Call the server action with form data
-      const result = await loginUser(formData);
+      // Call the relevant server action with form data
+      const result = mode === 'register' ? await registerUser(formData) : await loginUser(formData);
 
       // Check if server returned an error
       if (result.error) {
         setError(result.error); // Display error message to user
       } else {
-        // Login successful - redirect to dashboard
+        if (mode === 'register') {
+          setInfo('Registration successful. Redirecting to dashboard...');
+        }
+        // Authentication successful - redirect to dashboard
         // Note: In production, consider using Next.js router for client-side navigation
         window.location.href = '/dashboard';
       }
@@ -52,7 +60,35 @@ export default function LoginPage() {
       <div className="w-full max-w-sm space-y-6">
         {/* Title section */}
         <div>
-          <h1 className="text-2xl font-bold">Sign in to your account</h1>
+          <h1 className="text-2xl font-bold">{mode === 'login' ? 'Sign in to your account' : 'Create your account'}</h1>
+          <p className="text-sm text-foreground/60 mt-1">
+            {mode === 'login' ? 'Use your existing credentials to continue.' : 'Register a new account stored in AWS DynamoDB.'}
+          </p>
+        </div>
+
+        <div className="flex rounded-md border border-foreground/20 p-1">
+          <button
+            type="button"
+            className={`flex-1 rounded px-3 py-2 text-sm ${mode === 'login' ? 'bg-foreground text-background' : 'text-foreground/80'}`}
+            onClick={() => {
+              setMode('login');
+              setError('');
+              setInfo('');
+            }}
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
+            className={`flex-1 rounded px-3 py-2 text-sm ${mode === 'register' ? 'bg-foreground text-background' : 'text-foreground/80'}`}
+            onClick={() => {
+              setMode('register');
+              setError('');
+              setInfo('');
+            }}
+          >
+            Register
+          </button>
         </div>
 
         {/* Login form with submit handler */}
@@ -93,10 +129,35 @@ export default function LoginPage() {
             />
           </div>
 
+          {mode === 'register' && (
+            <div className="space-y-2">
+              <label htmlFor="confirmPassword" className="block text-sm font-medium">
+                Confirm password
+              </label>
+              <input
+                id="confirmPassword"
+                name="confirmPassword"
+                type="password"
+                autoComplete="new-password"
+                required
+                className="w-full px-3 py-2 border border-foreground/20 rounded-md bg-background text-foreground placeholder:text-foreground/50 focus:outline-none focus:ring-2 focus:ring-foreground/30"
+                placeholder="Confirm your password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+            </div>
+          )}
+
           {/* Error message display - only shows when error exists */}
           {error && (
             <div className="p-3 rounded-md bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 text-sm">
               {error}
+            </div>
+          )}
+
+          {info && (
+            <div className="p-3 rounded-md bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200 text-sm">
+              {info}
             </div>
           )}
 
@@ -107,7 +168,7 @@ export default function LoginPage() {
             className="w-full py-2 px-4 rounded-md bg-foreground text-background font-medium hover:bg-foreground/90 focus:outline-none focus:ring-2 focus:ring-foreground/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {/* Dynamic button text based on loading state */}
-            {isLoading ? 'Signing in...' : 'Sign in'}
+            {isLoading ? (mode === 'login' ? 'Signing in...' : 'Registering...') : (mode === 'login' ? 'Sign in' : 'Register')}
           </button>
 
           {/* Forgot password link */}

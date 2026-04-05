@@ -27,3 +27,21 @@ variable "persist_schedules" {
   type        = bool
   default     = false
 }
+
+variable "lambda_get_config_function_name" {
+  description = "Name of the Lambda that returns stored nursery config"
+  type        = string
+  default     = "nursery-config-get"
+}
+
+variable "lambda_upsert_config_function_name" {
+  description = "Name of the Lambda that creates/replaces nursery config"
+  type        = string
+  default     = "nursery-config-upsert"
+}
+
+variable "lambda_patch_config_function_name" {
+  description = "Name of the Lambda that patches rooms/staff/settings/children"
+  type        = string
+  default     = "nursery-config-patch"
+}

@@ -65,6 +65,24 @@ resource "aws_dynamodb_table" "NurseryConfig" {
   }
 }
 
+# DynamoDB table to store authentication users for Next.js login/registration.
+resource "aws_dynamodb_table" "NurseryUsers" {
+  name         = "NurseryUsers"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "email"
+
+  attribute {
+    name = "email"
+    type = "S"
+  }
+
+  tags = {
+    Environment = "development"
+    Owner       = "Euan"
+    Application = "NurseryScheduleApp"
+  }
+}
+
 # Package the Lambda source directory, including dependencies installed in terraform/lambda/node_modules.
 data "archive_file" "scheduler_lambda_zip" {
   type        = "zip"
@@ -129,6 +147,84 @@ resource "aws_lambda_function" "nursery_scheduler" {
   role             = aws_iam_role.lambda_role.arn
   runtime          = "nodejs20.x"
   handler          = "index_prod.handler"
+  filename         = data.archive_file.scheduler_lambda_zip.output_path
+  source_code_hash = data.archive_file.scheduler_lambda_zip.output_base64sha256
+  timeout          = 30
+  memory_size      = 512
+
+  environment {
+    variables = {
+      SCHEDULE_TABLE_NAME      = aws_dynamodb_table.NurserySchedules.name
+      STAGE_HISTORY_TABLE_NAME = aws_dynamodb_table.NurseryScheduleHistory.name
+      CONFIG_TABLE_NAME        = aws_dynamodb_table.NurseryConfig.name
+      PERSIST_SCHEDULES        = tostring(var.persist_schedules)
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_basic_execution,
+    aws_iam_role_policy.lambda_dynamodb_policy
+  ]
+}
+
+# Lambda function for reading stored nursery config from DynamoDB.
+resource "aws_lambda_function" "nursery_config_get" {
+  function_name    = var.lambda_get_config_function_name
+  role             = aws_iam_role.lambda_role.arn
+  runtime          = "nodejs20.x"
+  handler          = "index_prod.getNurseryConfigHandler"
+  filename         = data.archive_file.scheduler_lambda_zip.output_path
+  source_code_hash = data.archive_file.scheduler_lambda_zip.output_base64sha256
+  timeout          = 30
+  memory_size      = 512
+
+  environment {
+    variables = {
+      SCHEDULE_TABLE_NAME      = aws_dynamodb_table.NurserySchedules.name
+      STAGE_HISTORY_TABLE_NAME = aws_dynamodb_table.NurseryScheduleHistory.name
+      CONFIG_TABLE_NAME        = aws_dynamodb_table.NurseryConfig.name
+      PERSIST_SCHEDULES        = tostring(var.persist_schedules)
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_basic_execution,
+    aws_iam_role_policy.lambda_dynamodb_policy
+  ]
+}
+
+# Lambda function for creating/replacing nursery config in DynamoDB.
+resource "aws_lambda_function" "nursery_config_upsert" {
+  function_name    = var.lambda_upsert_config_function_name
+  role             = aws_iam_role.lambda_role.arn
+  runtime          = "nodejs20.x"
+  handler          = "index_prod.upsertNurseryConfigHandler"
+  filename         = data.archive_file.scheduler_lambda_zip.output_path
+  source_code_hash = data.archive_file.scheduler_lambda_zip.output_base64sha256
+  timeout          = 30
+  memory_size      = 512
+
+  environment {
+    variables = {
+      SCHEDULE_TABLE_NAME      = aws_dynamodb_table.NurserySchedules.name
+      STAGE_HISTORY_TABLE_NAME = aws_dynamodb_table.NurseryScheduleHistory.name
+      CONFIG_TABLE_NAME        = aws_dynamodb_table.NurseryConfig.name
+      PERSIST_SCHEDULES        = tostring(var.persist_schedules)
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_basic_execution,
+    aws_iam_role_policy.lambda_dynamodb_policy
+  ]
+}
+
+# Lambda function for patching rooms/staff/settings/childrenCount in the stored config.
+resource "aws_lambda_function" "nursery_config_patch" {
+  function_name    = var.lambda_patch_config_function_name
+  role             = aws_iam_role.lambda_role.arn
+  runtime          = "nodejs20.x"
+  handler          = "index_prod.patchNurseryConfigHandler"
   filename         = data.archive_file.scheduler_lambda_zip.output_path
   source_code_hash = data.archive_file.scheduler_lambda_zip.output_base64sha256
   timeout          = 30

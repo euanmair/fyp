@@ -131,6 +131,19 @@ function formatAjvErrors(errors) {
   return (errors || []).map((err) => ({ path: err.instancePath || err.dataPath, message: err.message })).slice(0, 10);
 }
 
+// Build a compact summary so API responses remain small when large configs are updated.
+function buildConfigSummary(config) {
+        return {
+                roomCount: Array.isArray(config?.rooms) ? config.rooms.length : 0,
+                staffCount: Array.isArray(config?.staff) ? config.staff.length : 0,
+                childrenBuckets: Object.keys(config?.childrenCount || {}),
+                planningWeeks: config?.settings?.planningWeeks ?? null,
+                workDays: config?.settings?.workDays || [],
+                dayStart: config?.settings?.dayStart ?? null,
+                dayEnd: config?.settings?.dayEnd ?? null
+        };
+}
+
 function generateSchedule({ rooms, staff, settings, childrenCount }) {
     // This function will generate a schedule based on the provided rooms, staff, and settings.
     const planningWeeks = settings.planningWeeks || 1; // If no week present, default to 1 week of scheduling
@@ -247,6 +260,123 @@ export const handler = async (event) => {
     }
 };
 
+// Lambda function for Next.js: fetch an existing nursery config by configID.
+export const getNurseryConfigHandler = async (event) => {
+    try {
+        const payload = parseEventPayload(event);
+        const configID = getConfigIDFromEvent(event, payload);
+
+        const storedConfig = await fetchStoredConfig(configID);
+        if (!storedConfig) {
+            return createJsonResponse(404, {
+                message: `No nursery config found for configID '${configID}'.`,
+                configID
+            });
+        }
+
+        return createJsonResponse(200, {
+            message: "Nursery config retrieved successfully.",
+            configID,
+            summary: buildConfigSummary(storedConfig),
+            config: storedConfig
+        });
+    } catch (error) {
+        console.error("Error retrieving nursery config:", error);
+        return createJsonResponse(500, {
+            message: "Internal Server Error",
+            error: error?.message || "Unknown error"
+        });
+    }
+};
+
+// Lambda function for Next.js: replace or create a full nursery config.
+export const upsertNurseryConfigHandler = async (event) => {
+    try {
+        const payload = parseEventPayload(event);
+        const configID = getConfigIDFromEvent(event, payload);
+
+        const nextConfig = {
+            rooms: payload?.rooms ?? [],
+            staff: payload?.staff,
+            settings: payload?.settings,
+            childrenCount: payload?.childrenCount
+        };
+
+        const isValid = validateSchedule(nextConfig);
+        if (!isValid) {
+            return createJsonResponse(400, {
+                message: "Invalid nursery config payload.",
+                errors: formatAjvErrors(validateSchedule.errors)
+            });
+        }
+
+        await saveNurseryConfig(configID, nextConfig);
+        const savedConfig = await fetchStoredConfig(configID);
+
+        return createJsonResponse(200, {
+            message: "Nursery config saved successfully.",
+            configID,
+            summary: buildConfigSummary(savedConfig),
+            config: savedConfig
+        });
+    } catch (error) {
+        console.error("Error upserting nursery config:", error);
+        const statusCode = error?.name === "SyntaxError" ? 400 : 500;
+        return createJsonResponse(statusCode, {
+            message: statusCode === 400 ? "Invalid JSON payload." : "Internal Server Error",
+            error: error?.message || "Unknown error"
+        });
+    }
+};
+
+// Lambda function for Next.js: patch room/staff/settings/children data without replacing the whole config.
+export const patchNurseryConfigHandler = async (event) => {
+    try {
+        const payload = parseEventPayload(event);
+        const configID = getConfigIDFromEvent(event, payload);
+
+        const current = await fetchStoredConfig(configID);
+        if (!current) {
+            return createJsonResponse(404, {
+                message: `No nursery config found for configID '${configID}'.`,
+                configID
+            });
+        }
+
+        const patched = applyConfigPatch(current, payload);
+        const isValid = validateSchedule(patched);
+        if (!isValid) {
+            return createJsonResponse(400, {
+                message: "Patch would produce an invalid nursery config.",
+                errors: formatAjvErrors(validateSchedule.errors)
+            });
+        }
+
+        await saveNurseryConfig(configID, patched);
+
+        return createJsonResponse(200, {
+            message: "Nursery config patched successfully.",
+            configID,
+            summary: buildConfigSummary(patched),
+            config: patched
+        });
+    } catch (error) {
+        console.error("Error patching nursery config:", error);
+        const statusCode = error?.name === "SyntaxError" ? 400 : 500;
+        return createJsonResponse(statusCode, {
+            message: statusCode === 400 ? "Invalid JSON payload." : "Internal Server Error",
+            error: error?.message || "Unknown error"
+        });
+    }
+};
+
+function getConfigIDFromEvent(event, payload) {
+    return payload?.configID
+        || event?.pathParameters?.configID
+        || event?.queryStringParameters?.configID
+        || "default";
+}
+
 function parseEventPayload(event) {
     // Return an empty object for null/undefined events so the handler can fall back to stored config.
     if (!event) return {};
@@ -275,6 +405,75 @@ function createJsonResponse(statusCode, body) {
         },
         body: JSON.stringify(body)
     };
+}
+
+function applyConfigPatch(currentConfig, patchPayload) {
+    const next = {
+        rooms: Array.isArray(currentConfig?.rooms) ? [...currentConfig.rooms] : [],
+        staff: Array.isArray(currentConfig?.staff) ? [...currentConfig.staff] : [],
+        settings: { ...(currentConfig?.settings || {}) },
+        childrenCount: { ...(currentConfig?.childrenCount || {}) }
+    };
+
+    // Full-field replacements.
+    if (Array.isArray(patchPayload?.rooms)) next.rooms = patchPayload.rooms;
+    if (Array.isArray(patchPayload?.staff)) next.staff = patchPayload.staff;
+    if (patchPayload?.settings && typeof patchPayload.settings === "object") {
+        next.settings = { ...next.settings, ...patchPayload.settings };
+    }
+    if (patchPayload?.childrenCount && typeof patchPayload.childrenCount === "object") {
+        next.childrenCount = { ...next.childrenCount, ...patchPayload.childrenCount };
+    }
+
+    // Targeted room operations.
+    if (patchPayload?.addRoom && typeof patchPayload.addRoom === "object") {
+        next.rooms.push(patchPayload.addRoom);
+    }
+
+    if (patchPayload?.updateRoom && typeof patchPayload.updateRoom === "object") {
+        const roomID = patchPayload.updateRoom.roomID;
+        if (!roomID) throw new Error("updateRoom requires roomID.");
+        next.rooms = next.rooms.map((room) => room.roomID === roomID ? { ...room, ...patchPayload.updateRoom } : room);
+    }
+
+    if (patchPayload?.removeRoomID) {
+        next.rooms = next.rooms.filter((room) => room.roomID !== patchPayload.removeRoomID);
+    }
+
+    // Targeted staff operations.
+    if (patchPayload?.addStaff && typeof patchPayload.addStaff === "object") {
+        next.staff.push(patchPayload.addStaff);
+    }
+
+    if (patchPayload?.updateStaff && typeof patchPayload.updateStaff === "object") {
+        const staffID = patchPayload.updateStaff.staffID;
+        if (!staffID) throw new Error("updateStaff requires staffID.");
+        next.staff = next.staff.map((member) => member.staffID === staffID ? { ...member, ...patchPayload.updateStaff } : member);
+    }
+
+    if (patchPayload?.removeStaffID) {
+        next.staff = next.staff.filter((member) => member.staffID !== patchPayload.removeStaffID);
+    }
+
+    // Optional explicit staff quantity trim so Next.js can cap workforce size quickly.
+    if (Number.isInteger(patchPayload?.trimStaffTo) && patchPayload.trimStaffTo >= 0) {
+        next.staff = next.staff.slice(0, patchPayload.trimStaffTo);
+    }
+
+    // Targeted settings and childrenCount changes.
+    if (patchPayload?.setSetting && typeof patchPayload.setSetting === "object") {
+        for (const [key, value] of Object.entries(patchPayload.setSetting)) {
+            next.settings[key] = value;
+        }
+    }
+
+    if (patchPayload?.setChildrenCount && typeof patchPayload.setChildrenCount === "object") {
+        for (const [bucket, value] of Object.entries(patchPayload.setChildrenCount)) {
+            next.childrenCount[bucket] = value;
+        }
+    }
+
+    return next;
 }
 
 async function persistScheduleResult(input, result) {

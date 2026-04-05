@@ -6,26 +6,109 @@
 import { cookies } from 'next/headers';
 import bcrypt from 'bcryptjs';
 import { SignJWT } from 'jose';
+import { createHash, randomUUID } from 'crypto';
+import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
 
-// This is a placeholder - replace with your actual user database/model
 interface User {
   id: string;
   email: string;
   passwordHash: string;
-  // Add other user fields as needed
+  createdAt?: string;
+  resetTokenHash?: string;
+  resetTokenExpiresAt?: string;
 }
 
-// Placeholder user database - replace with actual database query
-const users: User[] = [
-  {
-    id: '1',
-    email: 'user@example.com',
-    passwordHash: 'example', // bcrypt hash for password: "Test@123"
-  },
-];
-
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const USERS_TABLE_NAME = process.env.USERS_TABLE_NAME || 'NurseryUsers';
+const AWS_REGION = process.env.AWS_REGION || 'eu-north-1';
+const dynamoClient = new DynamoDBClient({ region: AWS_REGION });
 // NOTE: Always set JWT_SECRET in .env.local for security - default value is for development only
+
+function normaliseEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+async function getUserByEmail(email: string): Promise<User | null> {
+  const normalisedEmail = normaliseEmail(email);
+  const response = await dynamoClient.send(
+    new GetItemCommand({
+      TableName: USERS_TABLE_NAME,
+      Key: {
+        email: { S: normalisedEmail },
+      },
+    })
+  );
+
+  if (!response.Item) return null;
+
+  const id = response.Item.id?.S;
+  const storedEmail = response.Item.email?.S;
+  const passwordHash = response.Item.passwordHash?.S;
+  const createdAt = response.Item.createdAt?.S;
+  const resetTokenHash = response.Item.resetTokenHash?.S;
+  const resetTokenExpiresAt = response.Item.resetTokenExpiresAt?.S;
+
+  if (!id || !storedEmail || !passwordHash) {
+    throw new Error('User record is malformed in DynamoDB.');
+  }
+
+  return {
+    id,
+    email: storedEmail,
+    passwordHash,
+    createdAt,
+    resetTokenHash,
+    resetTokenExpiresAt,
+  };
+}
+
+async function saveUser(user: User) {
+  const item: Record<string, { S: string }> = {
+    email: { S: user.email },
+    id: { S: user.id },
+    passwordHash: { S: user.passwordHash },
+    createdAt: { S: user.createdAt || new Date().toISOString() },
+  };
+
+  if (user.resetTokenHash) {
+    item.resetTokenHash = { S: user.resetTokenHash };
+  }
+
+  if (user.resetTokenExpiresAt) {
+    item.resetTokenExpiresAt = { S: user.resetTokenExpiresAt };
+  }
+
+  await dynamoClient.send(
+    new PutItemCommand({
+      TableName: USERS_TABLE_NAME,
+      Item: item,
+    })
+  );
+}
+
+function hashResetToken(token: string) {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+async function setAuthCookie(user: { id: string; email: string }) {
+  const secret = new TextEncoder().encode(JWT_SECRET);
+  const token = await new SignJWT({
+    userId: user.id,
+    email: user.email,
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setExpirationTime('7d')
+    .sign(secret);
+
+  const cookieStore = await cookies();
+  cookieStore.set('auth-token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 60 * 60 * 24 * 7,
+    path: '/',
+  });
+}
 
 export async function loginUser(formData: FormData) {
   // AUTHENTICATION FLOW WITH JOSE & JWT:
@@ -42,7 +125,7 @@ export async function loginUser(formData: FormData) {
   // - Token stored in HTTP-only cookie prevents XSS attacks
   // - Tokens expire in 7 days, forcing re-authentication
   
-  const email = formData.get('email') as string;
+  const email = normaliseEmail(formData.get('email') as string);
   const password = formData.get('password') as string;
 
   // Validate input
@@ -60,8 +143,8 @@ export async function loginUser(formData: FormData) {
   }
 
   try {
-    // Find user - replace with actual database query
-    const user = users.find(u => u.email === email);
+    // Find user from DynamoDB
+    const user = await getUserByEmail(email);
 
     if (!user) {
       return { error: 'Invalid email or password' };
@@ -74,40 +157,7 @@ export async function loginUser(formData: FormData) {
       return { error: 'Invalid email or password' };
     }
 
-    // Generate JWT token using jose (same library as middleware for consistency)
-    // Convert JWT_SECRET string to Uint8Array format (required by jose)
-    const secret = new TextEncoder().encode(JWT_SECRET);
-    
-    // SignJWT from jose library - async-based, modern approach
-    // Steps:
-    // 1. new SignJWT() - Create token builder with payload
-    // 2. setProtectedHeader() - Set algorithm (HS256 = HMAC-SHA256)
-    // 3. setExpirationTime() - Token expires in 7 days
-    // 4. sign() - Cryptographically sign token with secret
-    // Result: A JWT string like "eyJhbGc.eyJpc3N...twqeqPg"
-    const token = await new SignJWT({
-      userId: user.id,
-      email: user.email,
-    })
-      .setProtectedHeader({ alg: 'HS256' }) // Algorithm for token signing
-      .setExpirationTime('7d') // Token expires in 7 days
-      .sign(secret);
-
-    // Set HTTP-only cookie with JWT token
-    // Cookie security options:
-    // - httpOnly: true = prevents JavaScript from accessing (protects against XSS)
-    // - secure: true in production = only sent over HTTPS
-    // - sameSite: 'strict' = prevents CSRF attacks
-    // - maxAge: 7 days = cookie expires automatically
-    // - path: '/' = cookie sent with all requests
-    const cookieStore = await cookies();
-    cookieStore.set('auth-token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-      path: '/',
-    });
+    await setAuthCookie({ id: user.id, email: user.email });
 
     // Success - redirect will happen on client side
     return { success: true };
@@ -115,5 +165,150 @@ export async function loginUser(formData: FormData) {
   } catch (error) {
     console.error('Login error:', error);
     return { error: 'An error occurred during login' };
+  }
+}
+
+export async function registerUser(formData: FormData) {
+  const email = normaliseEmail(formData.get('email') as string);
+  const password = formData.get('password') as string;
+  const confirmPassword = formData.get('confirmPassword') as string;
+
+  if (!email || !password || !confirmPassword) {
+    return { error: 'Email, password and confirm password are required' };
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { error: 'Please enter a valid email address' };
+  }
+
+  if (password.length < 8) {
+    return { error: 'Password must be at least 8 characters long' };
+  }
+
+  if (password !== confirmPassword) {
+    return { error: 'Passwords do not match' };
+  }
+
+  try {
+    const existingUser = await getUserByEmail(email);
+    if (existingUser) {
+      return { error: 'An account with this email already exists' };
+    }
+
+    const userId = randomUUID();
+    const passwordHash = await bcrypt.hash(password, 12);
+    const createdAt = new Date().toISOString();
+
+    await dynamoClient.send(
+      new PutItemCommand({
+        TableName: USERS_TABLE_NAME,
+        Item: {
+          email: { S: email },
+          id: { S: userId },
+          passwordHash: { S: passwordHash },
+          createdAt: { S: createdAt },
+        },
+        ConditionExpression: 'attribute_not_exists(email)',
+      })
+    );
+
+    await setAuthCookie({ id: userId, email });
+
+    return { success: true, message: 'Account created successfully' };
+  } catch (error) {
+    console.error('Registration error:', error);
+    return { error: 'An error occurred during registration' };
+  }
+}
+
+export async function requestPasswordReset(formData: FormData) {
+  const email = normaliseEmail(formData.get('email') as string);
+
+  if (!email) {
+    return { error: 'Email is required' };
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { error: 'Please enter a valid email address' };
+  }
+
+  try {
+    const user = await getUserByEmail(email);
+
+    // Avoid account enumeration: respond with success even if the account is not found.
+    if (!user) {
+      return { success: true, message: 'If the email exists, a reset code has been generated.' };
+    }
+
+    const resetToken = randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase();
+    const resetTokenHash = hashResetToken(resetToken);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+    await saveUser({
+      ...user,
+      resetTokenHash,
+      resetTokenExpiresAt: expiresAt,
+    });
+
+    // In production, the token should be sent by email/SMS rather than returned.
+    const developmentCode = process.env.NODE_ENV !== 'production' ? resetToken : undefined;
+
+    return {
+      success: true,
+      message: 'If the email exists, a reset code has been generated.',
+      developmentCode,
+      expiresAt,
+    };
+  } catch (error) {
+    console.error('Request password reset error:', error);
+    return { error: 'Unable to start password reset flow' };
+  }
+}
+
+export async function resetPassword(formData: FormData) {
+  const email = normaliseEmail(formData.get('email') as string);
+  const code = String(formData.get('code') || '').trim().toUpperCase();
+  const newPassword = String(formData.get('newPassword') || '');
+  const confirmPassword = String(formData.get('confirmPassword') || '');
+
+  if (!email || !code || !newPassword || !confirmPassword) {
+    return { error: 'Email, reset code, new password and confirm password are required' };
+  }
+
+  if (newPassword.length < 8) {
+    return { error: 'Password must be at least 8 characters long' };
+  }
+
+  if (newPassword !== confirmPassword) {
+    return { error: 'Passwords do not match' };
+  }
+
+  try {
+    const user = await getUserByEmail(email);
+    if (!user || !user.resetTokenHash || !user.resetTokenExpiresAt) {
+      return { error: 'Invalid or expired reset code' };
+    }
+
+    const expiresAtMs = new Date(user.resetTokenExpiresAt).getTime();
+    if (!Number.isFinite(expiresAtMs) || Date.now() > expiresAtMs) {
+      return { error: 'Invalid or expired reset code' };
+    }
+
+    if (hashResetToken(code) !== user.resetTokenHash) {
+      return { error: 'Invalid or expired reset code' };
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await saveUser({
+      ...user,
+      passwordHash,
+      resetTokenHash: undefined,
+      resetTokenExpiresAt: undefined,
+    });
+
+    return { success: true, message: 'Password updated successfully. You can now sign in.' };
+  } catch (error) {
+    console.error('Reset password error:', error);
+    return { error: 'Unable to reset password at this time' };
   }
 }
