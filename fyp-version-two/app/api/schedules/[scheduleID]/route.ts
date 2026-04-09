@@ -111,8 +111,8 @@ export async function GET(_request: Request, context: { params: Promise<{ schedu
     }
 
     const assignments = Array.isArray(schedule.assignments) ? (schedule.assignments as Assignment[]) : [];
-    const filteredAssignments = session.role === "staff" && session.staffID
-      ? assignments.filter((item) => item.staffID === session.staffID)
+    const filteredAssignments = session.role === "staff"
+      ? (session.staffID ? assignments.filter((item) => item.staffID === session.staffID) : [])
       : assignments;
 
     return NextResponse.json({

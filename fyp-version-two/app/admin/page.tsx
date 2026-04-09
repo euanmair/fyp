@@ -33,9 +33,6 @@ export default function AdminPage() {
   const [selectedOrgFilter, setSelectedOrgFilter] = useState('');
   const [scheduleOrgFilter, setScheduleOrgFilter] = useState('');
 
-  const [newOrgID, setNewOrgID] = useState('');
-  const [newOrgName, setNewOrgName] = useState('');
-
   const [status, setStatus] = useState('Loading admin data...');
   const [error, setError] = useState('');
   const [isBusy, setIsBusy] = useState(false);
@@ -101,87 +98,6 @@ export default function AdminPage() {
         staffID: user.staffID,
       },
     }));
-  }
-
-  async function createOrganisation() {
-    setError('');
-    if (!newOrgID || !newOrgName) {
-      setError('Organisation ID and organisation name are required.');
-      return;
-    }
-
-    setIsBusy(true);
-    try {
-      const response = await fetch('/api/admin/organisations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ organisationID: newOrgID, organisationName: newOrgName }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.message || 'Unable to create organisation.');
-      }
-
-      setNewOrgID('');
-      setNewOrgName('');
-      setStatus('Organisation created successfully.');
-      await loadAdminData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unexpected organisation create error.');
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
-  async function saveOrganisation(org: Organisation) {
-    setIsBusy(true);
-    setError('');
-
-    try {
-      const response = await fetch(`/api/admin/organisations/${encodeURIComponent(org.organisationID)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ organisationName: org.organisationName, isActive: org.isActive }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.message || 'Unable to save organisation changes.');
-      }
-
-      setStatus(`Organisation ${org.organisationID} updated.`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unexpected organisation update error.');
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
-  async function deleteOrganisation(organisationID: string) {
-    if (!confirm(`Delete organisation ${organisationID}?`)) {
-      return;
-    }
-
-    setIsBusy(true);
-    setError('');
-
-    try {
-      const response = await fetch(`/api/admin/organisations/${encodeURIComponent(organisationID)}`, {
-        method: 'DELETE',
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.message || 'Unable to delete organisation.');
-      }
-
-      setStatus(`Organisation ${organisationID} deleted.`);
-      await loadAdminData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unexpected organisation delete error.');
-    } finally {
-      setIsBusy(false);
-    }
   }
 
   async function saveUser(email: string) {
@@ -270,81 +186,9 @@ export default function AdminPage() {
     <main className="mx-auto max-w-7xl space-y-6 px-4 py-8">
       <section className="rounded-xl border border-foreground/15 bg-background p-6">
         <h1 className="text-3xl font-bold">Admin Console</h1>
-        <p className="mt-2 text-foreground/70">Manage organisations and accounts from a dedicated admin area.</p>
+        <p className="mt-2 text-foreground/70">Manage user accounts and schedule records.</p>
         <p className="mt-3 text-sm text-foreground/70">{status}</p>
         {error ? <p className="mt-1 text-sm text-red-700">{error}</p> : null}
-      </section>
-
-      <section className="grid gap-6 lg:grid-cols-2">
-        <article className="rounded-xl border border-foreground/15 bg-background p-4">
-          <h2 className="text-xl font-semibold">Create organisation</h2>
-          <div className="mt-3 grid gap-3">
-            <input
-              className="rounded-md border border-foreground/20 px-3 py-2"
-              placeholder="organisation-id"
-              value={newOrgID}
-              onChange={(e) => setNewOrgID(e.target.value)}
-            />
-            <input
-              className="rounded-md border border-foreground/20 px-3 py-2"
-              placeholder="Organisation name"
-              value={newOrgName}
-              onChange={(e) => setNewOrgName(e.target.value)}
-            />
-            <button disabled={isBusy} onClick={createOrganisation} className="rounded-md bg-foreground px-4 py-2 text-background disabled:opacity-50">
-              Create organisation
-            </button>
-          </div>
-        </article>
-
-        <article className="rounded-xl border border-foreground/15 bg-background p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-xl font-semibold">Organisations</h2>
-            <button disabled={isBusy} onClick={loadAdminData} className="rounded-md border border-foreground/30 px-3 py-1 text-sm disabled:opacity-50">Refresh</button>
-          </div>
-          <div className="mt-3 max-h-96 overflow-auto rounded-md border border-foreground/15">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="border-b border-foreground/15 bg-foreground/5">
-                  <th className="px-2 py-2 text-left">ID</th>
-                  <th className="px-2 py-2 text-left">Name</th>
-                  <th className="px-2 py-2 text-left">Active</th>
-                  <th className="px-2 py-2 text-left">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {organisations.map((org) => (
-                  <tr key={org.organisationID} className="border-b border-foreground/10 align-top">
-                    <td className="px-2 py-2 font-mono text-xs">{org.organisationID}</td>
-                    <td className="px-2 py-2">
-                      <input
-                        className="w-full rounded border border-foreground/20 px-2 py-1"
-                        value={org.organisationName}
-                        onChange={(e) => setOrganisations((prev) => prev.map((item) => item.organisationID === org.organisationID ? { ...item, organisationName: e.target.value } : item))}
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <input
-                        type="checkbox"
-                        checked={org.isActive}
-                        onChange={(e) => setOrganisations((prev) => prev.map((item) => item.organisationID === org.organisationID ? { ...item, isActive: e.target.checked } : item))}
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <div className="flex gap-2">
-                        <button disabled={isBusy} onClick={() => saveOrganisation(org)} className="rounded border border-foreground/30 px-2 py-1 text-xs">Save</button>
-                        <button disabled={isBusy} onClick={() => deleteOrganisation(org.organisationID)} className="rounded border border-red-500/50 px-2 py-1 text-xs text-red-700">Delete</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {organisations.length === 0 ? (
-                  <tr><td className="px-2 py-3 text-foreground/60" colSpan={4}>No organisations found.</td></tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </article>
       </section>
 
       <section className="rounded-xl border border-foreground/15 bg-background p-4">

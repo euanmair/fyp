@@ -475,7 +475,7 @@ resource "aws_instance" "app_server" {
     # chmod 644 -R /opt/app/fyp-version-two
 
     # Deployments should be performed through CI/CD, not periodic force-reset jobs.
-    rm -f /etc/cron.d/repo-sync
+    # rm -f /etc/cron.d/repo-sync
 
   EOF
 }
