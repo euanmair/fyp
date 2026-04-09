@@ -9,6 +9,9 @@ export default function LoginPage() {
   const [email, setEmail] = useState(''); // Stores the user's email input
   const [password, setPassword] = useState(''); // Stores the user's password input
   const [confirmPassword, setConfirmPassword] = useState(''); // Stores confirm-password input for registration
+  const [role, setRole] = useState<'staff' | 'manager' | 'admin'>('staff');
+  const [organisationID, setOrganisationID] = useState('');
+  const [staffID, setStaffID] = useState('');
   const [error, setError] = useState(''); // Stores any error messages to display
   const [info, setInfo] = useState(''); // Stores non-error messages
   const [isLoading, setIsLoading] = useState(false); // Tracks if login request is in progress
@@ -27,6 +30,9 @@ export default function LoginPage() {
       formData.append('email', email); // Add email to form data
       formData.append('password', password); // Add password to form data
       formData.append('confirmPassword', confirmPassword);
+      formData.append('role', role);
+      formData.append('organisationID', organisationID);
+      formData.append('staffID', staffID);
 
       // Call the relevant server action with form data
       const result = mode === 'register' ? await registerUser(formData) : await loginUser(formData);
@@ -42,7 +48,7 @@ export default function LoginPage() {
         // Note: In production, consider using Next.js router for client-side navigation
         window.location.href = '/dashboard';
       }
-    } catch (err) {
+    } catch {
       // Handle unexpected errors (network issues, etc.)
       setError('An unexpected error occurred');
     } finally {
@@ -62,7 +68,7 @@ export default function LoginPage() {
         <div>
           <h1 className="text-2xl font-bold">{mode === 'login' ? 'Sign in to your account' : 'Create your account'}</h1>
           <p className="text-sm text-foreground/60 mt-1">
-            {mode === 'login' ? 'Use your existing credentials to continue.' : 'Register a new account stored in AWS DynamoDB.'}
+            {mode === 'login' ? 'Use your existing credentials to continue.' : 'Register a new account with role and optional organisation membership.'}
           </p>
         </div>
 
@@ -130,22 +136,69 @@ export default function LoginPage() {
           </div>
 
           {mode === 'register' && (
-            <div className="space-y-2">
-              <label htmlFor="confirmPassword" className="block text-sm font-medium">
-                Confirm password
-              </label>
-              <input
-                id="confirmPassword"
-                name="confirmPassword"
-                type="password"
-                autoComplete="new-password"
-                required
-                className="w-full px-3 py-2 border border-foreground/20 rounded-md bg-background text-foreground placeholder:text-foreground/50 focus:outline-none focus:ring-2 focus:ring-foreground/30"
-                placeholder="Confirm your password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-              />
-            </div>
+            <>
+              <div className="space-y-2">
+                <label htmlFor="confirmPassword" className="block text-sm font-medium">
+                  Confirm password
+                </label>
+                <input
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  className="w-full px-3 py-2 border border-foreground/20 rounded-md bg-background text-foreground placeholder:text-foreground/50 focus:outline-none focus:ring-2 focus:ring-foreground/30"
+                  placeholder="Confirm your password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="role" className="block text-sm font-medium">
+                  Account role
+                </label>
+                <select
+                  id="role"
+                  name="role"
+                  value={role}
+                  onChange={(e) => setRole((e.target.value as 'staff' | 'manager' | 'admin') || 'staff')}
+                  className="w-full px-3 py-2 border border-foreground/20 rounded-md bg-background text-foreground"
+                >
+                  <option value="staff">Staff</option>
+                  <option value="manager">Manager</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="organisationID" className="block text-sm font-medium">
+                  Organisation ID (optional)
+                </label>
+                <input
+                  id="organisationID"
+                  name="organisationID"
+                  className="w-full px-3 py-2 border border-foreground/20 rounded-md bg-background text-foreground"
+                  placeholder="e.g. little-stars-nursery"
+                  value={organisationID}
+                  onChange={(e) => setOrganisationID(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="staffID" className="block text-sm font-medium">
+                  Staff ID (optional)
+                </label>
+                <input
+                  id="staffID"
+                  name="staffID"
+                  className="w-full px-3 py-2 border border-foreground/20 rounded-md bg-background text-foreground"
+                  placeholder="e.g. ST-102"
+                  value={staffID}
+                  onChange={(e) => setStaffID(e.target.value)}
+                />
+              </div>
+            </>
           )}
 
           {/* Error message display - only shows when error exists */}
@@ -178,6 +231,14 @@ export default function LoginPage() {
               className="text-sm text-foreground/60 hover:text-foreground"
             >
               Forgot your password?
+            </a>
+          </div>
+          <div className="text-center">
+            <a
+              href="/join-organisation"
+              className="text-sm text-foreground/60 hover:text-foreground"
+            >
+              Already registered? Join an organisation
             </a>
           </div>
         </form>

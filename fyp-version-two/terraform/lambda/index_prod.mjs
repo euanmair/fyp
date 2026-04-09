@@ -28,6 +28,17 @@ const scheduleSchema = {
     additionalProperties: false,
     required: ["staff", "settings", "childrenCount"],
     properties: {
+        organisationID: { type: "string" },
+        requestedBy: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+                userId: { type: "string" },
+                role: { type: "string" },
+                email: { type: "string" },
+                staffID: { type: "string" }
+            }
+        },
         rooms: {
             // There are the following requirements for the rooms:
             /* 1. roomID - A unique identifier for the room (string, required).
@@ -99,6 +110,8 @@ const scheduleSchema = {
                 budget: { type: "number", minimum: 0 },
                 maxShiftHours: { type: "number", exclusiveMinimum: 0 },
                 assignmentStrategy: { type: "string" },
+                weekStartDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+                forceGenerate: { type: "boolean" },
                 staffingRatios: {
                     type: "object",
                     additionalProperties: false,
@@ -146,10 +159,7 @@ function buildConfigSummary(config) {
 
 function generateSchedule({ rooms, staff, settings, childrenCount }) {
     // This function will generate a schedule based on the provided rooms, staff, and settings.
-    const planningWeeks = settings.planningWeeks || 1; // If no week present, default to 1 week of scheduling
-    const workDays = settings.workDays || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]; // Default to standard workweek
-    const shifts = generateShiftLength(settings.dayStart, settings.dayEnd);
-    const staffingRatios = buildStaffingRatios(childrenCount, settings?.staffingRatios);
+    buildStaffingRatios(childrenCount, settings?.staffingRatios);
 
     // So, legally the staffing ratios can only be enherited up.
     /* Practically, this means that lets say theres 2 under 2s, and 2 2-3s, the ratio for the first staff member will be 1:3.
@@ -166,13 +176,21 @@ function generateSchedule({ rooms, staff, settings, childrenCount }) {
      - Office staff will be allocated to office shifts, and not allocated to rooms
      - Budget will be taken into account, acting as a cap but not a target (plus a buffer)
     */
-    // Choose the assignment engine at runtime so the caller can switch between speed and optimisation.
-    const strategy = String(settings?.assignmentStrategy || "greedy").toLowerCase();
-    if (strategy === "optimised" || strategy === "optimized") {
+    const forceGenerate = settings?.forceGenerate === true;
+    try {
         return optimisedAssign(staff, settings, childrenCount, rooms);
-    }
+    } catch {
+        const shortage = estimateStaffShortage({ staff, settings, childrenCount, rooms });
+        if (!forceGenerate) {
+            const err = new Error(
+                `Insufficient staff to generate a compliant rota. Additional staff needed at peak segment: ${shortage.totalAdditionalStaffNeeded}.`
+            );
+            err.shortage = shortage;
+            throw err;
+        }
 
-    return greedyAssign(staff, settings, childrenCount, rooms);
+        return buildForcedScheduleWithGaps(staff, settings, childrenCount, rooms, shortage);
+    }
 
 }
 
@@ -203,11 +221,12 @@ export const handler = async (event) => {
 
         // Extract the config identifier before AJV strips unknown keys via removeAdditional.
         const configID = rawPayload?.configID ?? "default";
+        const organisationID = getOrganisationID(rawPayload);
 
         // If any required fields are absent, attempt to load the nursery's saved config from DynamoDB
         // so the function can operate without a full payload being supplied every time.
         const isMissingRequiredFields = !rawPayload?.staff || !rawPayload?.settings || !rawPayload?.childrenCount;
-        const storedConfig = isMissingRequiredFields ? await fetchStoredConfig(configID) : null;
+        const storedConfig = isMissingRequiredFields ? await fetchStoredConfig(configID, organisationID) : null;
 
         // Merge: stored config provides baseline values; raw request fields take precedence.
         const payload = mergeWithStoredConfig(rawPayload, storedConfig);
@@ -227,7 +246,7 @@ export const handler = async (event) => {
         // Wrapped in its own try/catch so a failed write does not abort the schedule response.
         if (payload?.settings?.updateConfig === true) {
             try {
-                await saveNurseryConfig(configID, payload);
+                await saveNurseryConfig(configID, organisationID, payload);
             } catch (saveErr) {
                 console.warn("Could not save nursery config to DynamoDB:", saveErr?.message);
             }
@@ -257,6 +276,7 @@ export const handler = async (event) => {
                 : "Schedule generated successfully.",
             configSource: storedConfig ? "dynamodb" : "request",
             result,
+            shortage: result?.shortage || null,
             persistence
         });
     } catch (error) {
@@ -269,14 +289,16 @@ export const handler = async (event) => {
             || message.includes("Not enough")
             || message.includes("Unable to assign")
             || message.includes("must include")
-            || message.includes("requires");
+            || message.includes("requires")
+            || message.includes("Insufficient staff");
         const statusCode = isClientSideError ? 400 : 500;
 
         return createJsonResponse(statusCode, {
             message: statusCode === 400
                 ? (error?.name === "SyntaxError" ? "Invalid JSON payload." : message)
                 : "Internal Server Error",
-            error: message
+            error: message,
+            shortage: error?.shortage || null
         });
     }
 };
@@ -286,8 +308,9 @@ export const getNurseryConfigHandler = async (event) => {
     try {
         const payload = parseEventPayload(event);
         const configID = getConfigIDFromEvent(event, payload);
+        const organisationID = getOrganisationID(payload);
 
-        const storedConfig = await fetchStoredConfig(configID);
+        const storedConfig = await fetchStoredConfig(configID, organisationID);
         if (!storedConfig) {
             return createJsonResponse(404, {
                 message: `No nursery config found for configID '${configID}'.`,
@@ -298,6 +321,7 @@ export const getNurseryConfigHandler = async (event) => {
         return createJsonResponse(200, {
             message: "Nursery config retrieved successfully.",
             configID,
+            organisationID,
             summary: buildConfigSummary(storedConfig),
             config: storedConfig
         });
@@ -315,6 +339,7 @@ export const upsertNurseryConfigHandler = async (event) => {
     try {
         const payload = parseEventPayload(event);
         const configID = getConfigIDFromEvent(event, payload);
+        const organisationID = getOrganisationID(payload);
 
         const nextConfig = {
             rooms: payload?.rooms ?? [],
@@ -331,12 +356,13 @@ export const upsertNurseryConfigHandler = async (event) => {
             });
         }
 
-        await saveNurseryConfig(configID, nextConfig);
-        const savedConfig = await fetchStoredConfig(configID);
+        await saveNurseryConfig(configID, organisationID, nextConfig);
+        const savedConfig = await fetchStoredConfig(configID, organisationID);
 
         return createJsonResponse(200, {
             message: "Nursery config saved successfully.",
             configID,
+            organisationID,
             summary: buildConfigSummary(savedConfig),
             config: savedConfig
         });
@@ -355,8 +381,9 @@ export const patchNurseryConfigHandler = async (event) => {
     try {
         const payload = parseEventPayload(event);
         const configID = getConfigIDFromEvent(event, payload);
+        const organisationID = getOrganisationID(payload);
 
-        const current = await fetchStoredConfig(configID);
+        const current = await fetchStoredConfig(configID, organisationID);
         if (!current) {
             return createJsonResponse(404, {
                 message: `No nursery config found for configID '${configID}'.`,
@@ -373,11 +400,12 @@ export const patchNurseryConfigHandler = async (event) => {
             });
         }
 
-        await saveNurseryConfig(configID, patched);
+        await saveNurseryConfig(configID, organisationID, patched);
 
         return createJsonResponse(200, {
             message: "Nursery config patched successfully.",
             configID,
+            organisationID,
             summary: buildConfigSummary(patched),
             config: patched
         });
@@ -501,27 +529,33 @@ async function persistScheduleResult(input, result) {
     const scheduleID = uuidv4();
     const historyID = uuidv4();
     const createdAt = new Date().toISOString();
+    const organisationID = getOrganisationID(input);
+    const weekStartDate = String(input?.settings?.weekStartDate || "").trim();
 
     const inputSummary = buildPersistedInputSummary(input);
     const resultSummary = buildPersistedResultSummary(result);
 
     const scheduleItem = {
         scheduleID,
+        organisationID,
         createdAt,
-        assignmentStrategy: input?.settings?.assignmentStrategy || "greedy",
+        assignmentStrategy: "optimised",
         planningWeeks: input?.settings?.planningWeeks || 1,
+        weekStartDate: weekStartDate || null,
         workDays: input?.settings?.workDays || [],
         budget: input?.settings?.budget ?? null,
         inputSummary,
-        resultSummary
+        resultSummary,
+        assignments: result?.assignments || []
     };
 
     const historyItem = {
         historyID,
         scheduleID,
+        organisationID,
         createdAt,
         eventType: "SCHEDULE_GENERATED",
-        assignmentStrategy: input?.settings?.assignmentStrategy || "greedy",
+        assignmentStrategy: "optimised",
         assignmentCount: result?.assignments?.length || 0,
         resultSummary
     };
@@ -565,7 +599,9 @@ function buildPersistedResultSummary(result) {
         officeRoomCount: result?.roomPlan?.officeRooms?.length || 0,
         assignmentCount: result?.assignments?.length || 0,
         staffHours: result?.staffHours || {},
-        optimisation: result?.optimisation || null
+        optimisation: result?.optimisation || null,
+        shortage: result?.shortage || null,
+        forcedGeneration: result?.forcedGeneration === true
     };
 }
 
@@ -603,13 +639,13 @@ function marshallValue(value) {
 
 // ─── Nursery Config persistence (DynamoDB read/write) ────────────────────────
 
-async function fetchStoredConfig(configID) {
+async function fetchStoredConfig(configID, organisationID) {
     // Retrieve the nursery's saved configuration from DynamoDB so the scheduler can
     // run without requiring a full payload on every request.
     try {
         const result = await dynamoClient.send(new GetItemCommand({
             TableName: configTable,
-            Key: { configID: { S: configID } }
+            Key: { configID: { S: getScopedConfigID(configID, organisationID) } }
         }));
         if (!result.Item) return null;
         return unmarshallConfig(result.Item);
@@ -621,11 +657,12 @@ async function fetchStoredConfig(configID) {
     }
 }
 
-async function saveNurseryConfig(configID, config) {
+async function saveNurseryConfig(configID, organisationID, config) {
     // Persist the nursery configuration so future calls without a full payload can
     // use it as the baseline.  Only the four scheduling-relevant fields are stored.
     const record = {
         configID,
+        organisationID,
         updatedAt: new Date().toISOString(),
         rooms: config.rooms ?? [],
         staff: config.staff,
@@ -634,14 +671,73 @@ async function saveNurseryConfig(configID, config) {
     };
     await dynamoClient.send(new PutItemCommand({
         TableName: configTable,
-        Item: marshallSimpleRecord(record)
+        Item: marshallSimpleRecord({ ...record, configID: getScopedConfigID(configID, organisationID) })
     }));
+}
+
+function getScopedConfigID(configID, organisationID) {
+    const org = String(organisationID || "public").trim();
+    return `${org}#${configID}`;
+}
+
+function getOrganisationID(payload) {
+    const org = String(payload?.organisationID || "").trim();
+    return org || "public";
+}
+
+function estimateStaffShortage({ staff, settings, childrenCount, rooms }) {
+    const planningWeeks = settings?.planningWeeks || 1;
+    const workDays = settings?.workDays || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+    const dayStart = settings?.dayStart || "08:00";
+    const dayEnd = settings?.dayEnd || "18:00";
+    const maxShiftHours = Number.isFinite(settings?.maxShiftHours) ? settings.maxShiftHours : null;
+    const daySegments = buildDaySegments(dayStart, dayEnd, maxShiftHours);
+
+    const roomPlan = buildRoomPlan(childrenCount, rooms);
+    const practitionerRequired = roomPlan.practitionerRooms.reduce((sum, room) => {
+        const ratio = resolveLegalRatioForBucket(room.ageGroup);
+        return sum + (room.children > 0 ? Math.ceil(room.children / ratio) : 0);
+    }, 0);
+    const officeRequired = roomPlan.officeRooms.length;
+
+    const practitionerStaff = (staff || []).filter((member) => !member.isOffice);
+    const officeStaff = (staff || []).filter((member) => member.isOffice);
+
+    let peakMissing = 0;
+    for (let week = 1; week <= planningWeeks; week += 1) {
+        for (const day of workDays) {
+            const availablePractitioners = practitionerStaff.filter((member) => !isStaffOnHoliday(member, day, week)).length;
+            const availableOffice = officeStaff.filter((member) => !isStaffOnHoliday(member, day, week)).length;
+            const missingThisSegment = Math.max(0, practitionerRequired - availablePractitioners) + Math.max(0, officeRequired - availableOffice);
+            if (missingThisSegment > peakMissing) {
+                peakMissing = missingThisSegment;
+            }
+        }
+    }
+
+    return {
+        daySegments: daySegments.length,
+        practitionerRequiredPerSegment: practitionerRequired,
+        officeRequiredPerSegment: officeRequired,
+        totalAdditionalStaffNeeded: peakMissing,
+    };
+}
+
+function buildForcedScheduleWithGaps(staff, settings, childrenCount, rooms, shortage) {
+    const result = greedyAssign(staff, { ...settings, assignmentStrategy: "optimised" }, childrenCount, rooms);
+    return {
+        ...result,
+        shortage,
+        forcedGeneration: true,
+    };
 }
 
 function mergeWithStoredConfig(rawPayload, stored) {
     // If no stored config exists, the raw payload is used as-is and will be validated below.
     if (!stored) return rawPayload ?? {};
     return {
+        organisationID: rawPayload?.organisationID,
+        requestedBy: rawPayload?.requestedBy,
         // Stored config provides the baseline; any keys supplied in the request override it.
         rooms: rawPayload?.rooms ?? stored?.rooms ?? [],
         staff: rawPayload?.staff ?? stored?.staff,
@@ -676,13 +772,6 @@ function unmarshallValue(typedValue) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-function generateShiftLength(dayStart, dayEnd) {
-    // This function will generate shifts based on the provided start and end times.
-    // The program assumes every day starts and ends at the same time.
-    const shiftLength = parseInt(dayEnd.split(":")[0], 10) - parseInt(dayStart.split(":")[0], 10);
-    return shiftLength;
-};
-
 function greedyAssign(staff, settings, childrenCount, rooms) {
     // Build the greedy scheduler inputs using sensible defaults where the request omits them.
     const planningWeeks = settings?.planningWeeks || 1;
@@ -690,6 +779,7 @@ function greedyAssign(staff, settings, childrenCount, rooms) {
     const dayStart = settings?.dayStart || "08:00";
     const dayEnd = settings?.dayEnd || "18:00";
     const maxShiftHours = Number.isFinite(settings?.maxShiftHours) ? settings.maxShiftHours : null;
+    const allowUnderstaffed = settings?.forceGenerate === true;
     // Split the day into legal assignable chunks if the daily opening hours exceed the maximum shift length.
     const daySegments = buildDaySegments(dayStart, dayEnd, maxShiftHours);
     const totalDayHours = daySegments.reduce((sum, segment) => sum + segment.hours, 0);
@@ -735,13 +825,13 @@ function greedyAssign(staff, settings, childrenCount, rooms) {
             const practitionerDayHours = new Map(availablePractitionerStaff.map((member) => [member.staffID, 0]));
             const officeDayHours = new Map(availableOfficeStaff.map((member) => [member.staffID, 0]));
 
-            if (dailyPractitionerSlots > availablePractitionerStaff.length) {
+            if (!allowUnderstaffed && dailyPractitionerSlots > availablePractitionerStaff.length) {
                 throw new Error(
                     `Not enough practitioner staff for ${day} (week ${week}). Required: ${dailyPractitionerSlots}, available: ${availablePractitionerStaff.length}.`
                 );
             }
 
-            if (officeRoomCount > availableOfficeStaff.length) {
+            if (!allowUnderstaffed && officeRoomCount > availableOfficeStaff.length) {
                 throw new Error(
                     `Not enough office staff for ${day} (week ${week}). Required: ${officeRoomCount}, available: ${availableOfficeStaff.length}.`
                 );
@@ -759,6 +849,24 @@ function greedyAssign(staff, settings, childrenCount, rooms) {
                         segment.hours
                     );
                     if (!member) {
+                        if (allowUnderstaffed) {
+                            assignments.push({
+                                week,
+                                day,
+                                staffID: "UNFILLED",
+                                staffName: "Unfilled",
+                                isOffice: true,
+                                roomID: officeRoom.roomID,
+                                roomName: officeRoom.roomName,
+                                ageGroup: officeRoom.ageGroup,
+                                start: segment.start,
+                                end: segment.end,
+                                hours: segment.hours,
+                                unfilled: true
+                            });
+                            continue;
+                        }
+
                         throw new Error(
                             `Unable to assign office cover for ${day} (week ${week}) in segment ${segment.start}-${segment.end}.`
                         );
@@ -794,6 +902,25 @@ function greedyAssign(staff, settings, childrenCount, rooms) {
                             segment.hours
                         );
                         if (!member) {
+                            if (allowUnderstaffed) {
+                                assignments.push({
+                                    week,
+                                    day,
+                                    staffID: "UNFILLED",
+                                    staffName: "Unfilled",
+                                    isOffice: false,
+                                    roomID: room.roomID,
+                                    roomName: room.roomName,
+                                    ageGroup: room.ageGroup,
+                                    legalRatio: `1:${room.ratio}`,
+                                    start: segment.start,
+                                    end: segment.end,
+                                    hours: segment.hours,
+                                    unfilled: true
+                                });
+                                continue;
+                            }
+
                             throw new Error(
                                 `Unable to satisfy legal staffing for room ${room.roomName} (${room.ageGroup}) on ${day} (week ${week}) in segment ${segment.start}-${segment.end}.`
                             );

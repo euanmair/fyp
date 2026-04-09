@@ -45,13 +45,40 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
-  // Check if the current request is for a protected route (dashboard)
-  const isProtectedRoute = request.nextUrl.pathname.startsWith("/dashboard");
+  const pathname = request.nextUrl.pathname;
+
+  // Check if the current request is for a protected route.
+  const isProtectedRoute = pathname.startsWith("/dashboard")
+    || pathname.startsWith("/admin")
+    || pathname.startsWith("/staff")
+    || pathname.startsWith("/join-organisation");
 
   // If user is NOT logged in and tries to access protected route, redirect to login
   // This enforces authentication requirement for dashboard
   if (!token && isProtectedRoute) {
     return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  if (!token) {
+    return NextResponse.next();
+  }
+
+  const role = String(token.role || "staff").toLowerCase();
+  const organisationID = token.organisationID ? String(token.organisationID) : "";
+
+  // Staff accounts should only view their rota by default.
+  if (pathname.startsWith("/dashboard") && role === "staff") {
+    return NextResponse.redirect(new URL("/staff", request.url));
+  }
+
+  // Admin-only area.
+  if (pathname.startsWith("/admin") && role !== "admin") {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
+  // Managers and admins should belong to an organisation before rota operations.
+  if (!organisationID && pathname.startsWith("/dashboard")) {
+    return NextResponse.redirect(new URL("/join-organisation", request.url));
   }
 
   // If none of the redirect conditions are met, allow request to proceed normally

@@ -36,13 +36,14 @@ type Room = {
 
 type Settings = {
   planningWeeks: number;
+  weekStartDate: string;
   workDays: string[];
   dayStart: string;
   dayEnd: string;
   budget: number;
   maxShiftHours: number;
-  assignmentStrategy: "optimised" | "greedy";
   persistResult: boolean;
+  forceGenerate: boolean;
 };
 
 type NurseryConfig = {
@@ -68,13 +69,14 @@ const DEFAULT_CONFIG: NurseryConfig = {
   ],
   settings: {
     planningWeeks: 1,
+    weekStartDate: new Date().toISOString().slice(0, 10),
     workDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
     dayStart: "08:00",
     dayEnd: "14:00",
     budget: 12000,
     maxShiftHours: 8,
-    assignmentStrategy: "optimised",
-    persistResult: false
+    persistResult: true,
+    forceGenerate: false,
   },
   childrenCount: { "0-24": 3, "24-36": 4 }
 };
@@ -86,6 +88,7 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>("Ready.");
   const [error, setError] = useState<string>("");
+  const [shortageMessage, setShortageMessage] = useState<string>("");
   const [lastPayload, setLastPayload] = useState<unknown>(null);
   const [lastSchedule, setLastSchedule] = useState<{ assignments?: Assignment[]; staffHours?: Record<string, number> } | null>(null);
   const [selectedWeek, setSelectedWeek] = useState(1);
@@ -156,13 +159,14 @@ export default function DashboardPage() {
       staff: Array.isArray(candidate.staff) ? candidate.staff as StaffMember[] : DEFAULT_CONFIG.staff,
       settings: {
         planningWeeks: Number(candidate.settings?.planningWeeks ?? DEFAULT_CONFIG.settings.planningWeeks),
+        weekStartDate: String(candidate.settings?.weekStartDate ?? DEFAULT_CONFIG.settings.weekStartDate),
         workDays: Array.isArray(candidate.settings?.workDays) ? candidate.settings!.workDays as string[] : DEFAULT_CONFIG.settings.workDays,
         dayStart: String(candidate.settings?.dayStart ?? DEFAULT_CONFIG.settings.dayStart),
         dayEnd: String(candidate.settings?.dayEnd ?? DEFAULT_CONFIG.settings.dayEnd),
         budget: Number(candidate.settings?.budget ?? DEFAULT_CONFIG.settings.budget),
         maxShiftHours: Number(candidate.settings?.maxShiftHours ?? DEFAULT_CONFIG.settings.maxShiftHours),
-        assignmentStrategy: candidate.settings?.assignmentStrategy === "greedy" ? "greedy" : "optimised",
         persistResult: Boolean(candidate.settings?.persistResult ?? DEFAULT_CONFIG.settings.persistResult),
+        forceGenerate: Boolean(candidate.settings?.forceGenerate ?? DEFAULT_CONFIG.settings.forceGenerate),
       },
       childrenCount: typeof candidate.childrenCount === "object" && candidate.childrenCount !== null
         ? Object.fromEntries(Object.entries(candidate.childrenCount).map(([k, v]) => [k, Number(v)]))
@@ -274,7 +278,9 @@ export default function DashboardPage() {
     const data = await response.json();
     if (!response.ok) {
       const message = data?.payload?.error || data?.payload?.message || data?.message || "Request failed";
-      throw new Error(message);
+      const err = new Error(message) as Error & { shortage?: { totalAdditionalStaffNeeded?: number } };
+      err.shortage = data?.payload?.shortage || data?.shortage;
+      throw err;
     }
     return data;
   }
@@ -309,6 +315,11 @@ export default function DashboardPage() {
       const data = await callLambda("generateSchedule", { configID, ...config });
       const payload = data?.payload;
       setLastPayload(payload);
+      if (payload?.shortage?.totalAdditionalStaffNeeded > 0) {
+        setShortageMessage(`Additional staff needed at peak segment: ${payload.shortage.totalAdditionalStaffNeeded}`);
+      } else {
+        setShortageMessage("");
+      }
       setLastSchedule(payload?.result || null);
       const weeks = new Set<number>();
       for (const item of payload?.result?.assignments || []) {
@@ -321,11 +332,18 @@ export default function DashboardPage() {
 
   async function withAction(loadingText: string, fn: () => Promise<void>) {
     setError("");
+    setShortageMessage("");
     setIsLoading(true);
     setStatusMessage(loadingText);
     try {
       await fn();
     } catch (err) {
+      if (err && typeof err === "object" && "shortage" in err) {
+        const shortage = (err as { shortage?: { totalAdditionalStaffNeeded?: number } }).shortage;
+        if (shortage?.totalAdditionalStaffNeeded) {
+          setShortageMessage(`Additional staff needed at peak segment: ${shortage.totalAdditionalStaffNeeded}`);
+        }
+      }
       setError(err instanceof Error ? err.message : "Unexpected error");
     } finally {
       setIsLoading(false);
@@ -353,9 +371,11 @@ export default function DashboardPage() {
           <button onClick={handleGetConfig} disabled={isLoading} className="rounded-md bg-foreground px-4 py-2 text-background disabled:opacity-50">Load Config</button>
           <button onClick={handleUpsertConfig} disabled={isLoading} className="rounded-md border border-foreground/30 px-4 py-2 disabled:opacity-50">Save Full Config</button>
           <button onClick={handleGenerateSchedule} disabled={isLoading} className="rounded-md border border-foreground/30 px-4 py-2 disabled:opacity-50">Generate Schedule</button>
+          <a href="/dashboard/history" className="rounded-md border border-foreground/30 px-4 py-2 text-sm">Open History and Shift Editor</a>
         </div>
         <p className="mt-3 text-sm text-foreground/70">{statusMessage}</p>
         {error ? <p className="mt-1 text-sm text-red-600">{error}</p> : null}
+        {shortageMessage ? <p className="mt-1 text-sm text-amber-700">{shortageMessage}</p> : null}
       </section>
 
       <section className="grid gap-6 xl:grid-cols-2">
@@ -366,6 +386,10 @@ export default function DashboardPage() {
             <label className="text-sm">
               Planning weeks
               <input type="number" min={1} className="mt-1 w-full rounded-md border border-foreground/20 bg-background px-2 py-1" value={config.settings.planningWeeks} onChange={(e) => updateSettings("planningWeeks", Math.max(1, Number(e.target.value || 1)))} />
+            </label>
+            <label className="text-sm">
+              Week start date
+              <input type="date" className="mt-1 w-full rounded-md border border-foreground/20 bg-background px-2 py-1" value={config.settings.weekStartDate} onChange={(e) => updateSettings("weekStartDate", e.target.value)} />
             </label>
             <label className="text-sm">
               Budget
@@ -383,18 +407,16 @@ export default function DashboardPage() {
               Max shift hours
               <input type="number" min={1} className="mt-1 w-full rounded-md border border-foreground/20 bg-background px-2 py-1" value={config.settings.maxShiftHours} onChange={(e) => updateSettings("maxShiftHours", Math.max(1, Number(e.target.value || 1)))} />
             </label>
-            <label className="text-sm">
-              Assignment strategy
-              <select className="mt-1 w-full rounded-md border border-foreground/20 bg-background px-2 py-1" value={config.settings.assignmentStrategy} onChange={(e) => updateSettings("assignmentStrategy", e.target.value === "greedy" ? "greedy" : "optimised")}> 
-                <option value="optimised">Optimised</option>
-                <option value="greedy">Greedy</option>
-              </select>
-            </label>
           </div>
 
           <div className="mt-3 flex items-center gap-2">
             <input id="persist" type="checkbox" checked={config.settings.persistResult} onChange={(e) => updateSettings("persistResult", e.target.checked)} />
             <label htmlFor="persist" className="text-sm">Persist generated schedules to DynamoDB</label>
+          </div>
+
+          <div className="mt-3 flex items-center gap-2">
+            <input id="forceGenerate" type="checkbox" checked={config.settings.forceGenerate} onChange={(e) => updateSettings("forceGenerate", e.target.checked)} />
+            <label htmlFor="forceGenerate" className="text-sm">Force generation if staffing is short (creates unfilled shifts)</label>
           </div>
 
           <div className="mt-4">

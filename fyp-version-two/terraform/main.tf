@@ -7,6 +7,17 @@ provider "aws" {
   region = var.aws_region
 }
 
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
 # --------------------------------------
 # DynamoDB
 # --------------------------------------
@@ -19,6 +30,23 @@ resource "aws_dynamodb_table" "NurserySchedules" {
   attribute {
     name = "scheduleID"
     type = "S"
+  }
+
+  attribute {
+    name = "organisationID"
+    type = "S"
+  }
+
+  attribute {
+    name = "weekStartDate"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "OrgWeekIndex"
+    hash_key        = "organisationID"
+    range_key       = "weekStartDate"
+    projection_type = "ALL"
   }
 
   tags = {
@@ -83,6 +111,23 @@ resource "aws_dynamodb_table" "NurseryUsers" {
   }
 }
 
+resource "aws_dynamodb_table" "NurseryOrganisations" {
+  name         = "NurseryOrganisations"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "organisationID"
+
+  attribute {
+    name = "organisationID"
+    type = "S"
+  }
+
+  tags = {
+    Environment = "development"
+    Owner       = "Euan"
+    Application = "NurseryScheduleApp"
+  }
+}
+
 # Package the Lambda source directory, including dependencies installed in terraform/lambda/node_modules.
 data "archive_file" "scheduler_lambda_zip" {
   type        = "zip"
@@ -132,9 +177,11 @@ resource "aws_iam_role_policy" "lambda_dynamodb_policy" {
         ]
         Resource = [
           aws_dynamodb_table.NurserySchedules.arn,
+          "${aws_dynamodb_table.NurserySchedules.arn}/index/*",
           aws_dynamodb_table.NurseryScheduleHistory.arn,
           "${aws_dynamodb_table.NurseryScheduleHistory.arn}/index/*",
-          aws_dynamodb_table.NurseryConfig.arn
+          aws_dynamodb_table.NurseryConfig.arn,
+          aws_dynamodb_table.NurseryOrganisations.arn
         ]
       }
     ]
@@ -170,10 +217,17 @@ resource "aws_iam_role_policy" "ec2_app_policy" {
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
-          "dynamodb:PutItem"
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
         ]
         Resource = [
-          aws_dynamodb_table.NurseryUsers.arn
+          aws_dynamodb_table.NurseryUsers.arn,
+          aws_dynamodb_table.NurseryOrganisations.arn,
+          aws_dynamodb_table.NurserySchedules.arn,
+          "${aws_dynamodb_table.NurserySchedules.arn}/index/*"
         ]
       },
       {
@@ -187,6 +241,15 @@ resource "aws_iam_role_policy" "ec2_app_policy" {
           aws_lambda_function.nursery_config_upsert.arn,
           aws_lambda_function.nursery_config_patch.arn
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [
+          aws_secretsmanager_secret.jwt_secret.arn
+        ]
       }
     ]
   })
@@ -195,6 +258,12 @@ resource "aws_iam_role_policy" "ec2_app_policy" {
 resource "aws_iam_instance_profile" "ec2_app_profile" {
   name = "nursery-app-ec2-profile"
   role = aws_iam_role.ec2_app_role.name
+}
+
+resource "aws_secretsmanager_secret" "jwt_secret" {
+  name                    = var.jwt_secret_name
+  description             = "JWT secret consumed by the Next.js app"
+  recovery_window_in_days = 7
 }
 
 # Nursery scheduling Lambda function.
@@ -356,9 +425,9 @@ resource "aws_instance" "app_server" {
     # Treat all errors as fatal and print each command before executing it
     set -eux
 
-    # Install Node.js, git
+    # Install Node.js, git and AWS CLI for Secrets Manager retrieval
     dnf update -y
-    dnf install -y nodejs git
+    dnf install -y nodejs git awscli
 
     # Setup app directory
     mkdir -p /opt/app
@@ -372,6 +441,11 @@ resource "aws_instance" "app_server" {
     npm install
     npm run build
 
+    JWT_SECRET_VALUE=$(aws secretsmanager get-secret-value --secret-id ${aws_secretsmanager_secret.jwt_secret.arn} --query SecretString --output text --region ${var.aws_region} 2>/dev/null || true)
+    if [ -z "$JWT_SECRET_VALUE" ] || [ "$JWT_SECRET_VALUE" = "None" ]; then
+      JWT_SECRET_VALUE="your-secret-key-change-in-production"
+    fi
+
     # Create systemd service that points to this service. This will ensure the app starts on boot and restarts if it crashes.
     # This is done by writing all text below into nodeapp.service, until the SERVICE tag.
     cat >/etc/systemd/system/nodeapp.service <<SERVICE
@@ -381,10 +455,12 @@ resource "aws_instance" "app_server" {
 
     [Service]
     WorkingDirectory=/opt/app/fyp-version-two
-    ExecStart=/usr/bin/env HOST=127.0.0.1 PORT=3000 npm run start
+    ExecStart=/usr/bin/env HOST=0.0.0.0 PORT=3000 NODE_ENV=production npm run start
     Restart=always
     User=ec2-user
-    Environment=NODE_ENV=development
+    Environment=NODE_ENV=production
+    Environment=AWS_REGION=${var.aws_region}
+    Environment=JWT_SECRET=$JWT_SECRET_VALUE
 
     [Install]
     WantedBy=multi-user.target
@@ -398,14 +474,8 @@ resource "aws_instance" "app_server" {
     chown ec2-user:ec2-user -R /opt/app/fyp-version-two
     # chmod 644 -R /opt/app/fyp-version-two
 
-    # Below cronjob is now confirmed working - Euan Mair 24/03/2026
-    cat <<CRON >/etc/cron.d/repo-sync
-    */5 * * * * root cd /opt/app/fyp-version-two && /usr/bin/git fetch origin && /usr/bin/git reset --hard origin/main && npm install && npm run build && systemctl restart nodeapp.service >> /var/log/repo-sync.log 2>&1
-    CRON
-
-    # Enabling & Restarting cron
-    systemctl enable crond
-    systemctl restart crond
+    # Deployments should be performed through CI/CD, not periodic force-reset jobs.
+    rm -f /etc/cron.d/repo-sync
 
   EOF
 }
@@ -417,7 +487,14 @@ resource "aws_instance" "app_server" {
 # Security group to allow SSH and HTTP access
 resource "aws_security_group" "app_sg" {
   name        = "app_security_group"
-  description = "Allow SSH only"
+  description = "Allow ALB to app and restricted SSH"
+
+  ingress {
+    from_port       = 3000
+    to_port         = 3000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
 
   ingress {
     from_port   = 22
@@ -432,6 +509,172 @@ resource "aws_security_group" "app_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+}
+
+resource "aws_security_group" "alb_sg" {
+  name        = "alb_security_group"
+  description = "Public HTTP/HTTPS access for ALB"
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = var.alb_ingress_cidrs
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = var.alb_ingress_cidrs
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_lb" "frontend_alb" {
+  name               = "nursery-frontend-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb_sg.id]
+  subnets            = data.aws_subnets.default.ids
+}
+
+resource "aws_lb_target_group" "app_tg" {
+  name        = "nursery-app-tg"
+  port        = 3000
+  protocol    = "HTTP"
+  target_type = "instance"
+  vpc_id      = data.aws_vpc.default.id
+
+  health_check {
+    path                = "/"
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    interval            = 30
+    timeout             = 5
+    matcher             = "200-399"
+  }
+}
+
+resource "aws_lb_target_group_attachment" "app_server_attachment" {
+  target_group_arn = aws_lb_target_group.app_tg.arn
+  target_id        = aws_instance.app_server.id
+  port             = 3000
+}
+
+resource "aws_lb_listener" "http_redirect" {
+  count             = var.alb_certificate_arn != "" ? 1 : 0
+  load_balancer_arn = aws_lb.frontend_alb.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type = "redirect"
+
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+}
+
+resource "aws_lb_listener" "http_plain" {
+  count             = var.alb_certificate_arn == "" ? 1 : 0
+  load_balancer_arn = aws_lb.frontend_alb.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app_tg.arn
+  }
+}
+
+resource "aws_lb_listener" "https" {
+  count             = var.alb_certificate_arn != "" ? 1 : 0
+  load_balancer_arn = aws_lb.frontend_alb.arn
+  port              = 443
+  protocol          = "HTTPS"
+  certificate_arn   = var.alb_certificate_arn
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app_tg.arn
+  }
+}
+
+resource "aws_wafv2_web_acl" "frontend" {
+  count = var.enable_waf ? 1 : 0
+  name  = "nursery-frontend-waf"
+  scope = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "aws-managed-common"
+    priority = 1
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    override_action {
+      none {}
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "awsManagedCommon"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "rate-limit"
+    priority = 2
+
+    statement {
+      rate_based_statement {
+        aggregate_key_type = "IP"
+        limit              = var.waf_rate_limit
+      }
+    }
+
+    action {
+      block {}
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "rateLimit"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "frontendWaf"
+    sampled_requests_enabled   = true
+  }
+}
+
+resource "aws_wafv2_web_acl_association" "frontend_alb" {
+  count        = var.enable_waf ? 1 : 0
+  resource_arn = aws_lb.frontend_alb.arn
+  web_acl_arn  = aws_wafv2_web_acl.frontend[0].arn
 }
 
 # Key Pair for SSH access
