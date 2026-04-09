@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type LambdaAction = "generateSchedule" | "getConfig" | "upsertConfig" | "patchConfig";
 
@@ -83,6 +83,7 @@ const DEFAULT_CONFIG: NurseryConfig = {
 
 export default function DashboardPage() {
   const [configID, setConfigID] = useState("default");
+  const [availableConfigs, setAvailableConfigs] = useState<string[]>([]);
   const [config, setConfig] = useState<NurseryConfig>(DEFAULT_CONFIG);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -94,6 +95,21 @@ export default function DashboardPage() {
   const [selectedWeek, setSelectedWeek] = useState(1);
   const [staffSearch, setStaffSearch] = useState("");
   const [visibleStaffRows, setVisibleStaffRows] = useState(STAFF_PAGE_SIZE);
+
+  useEffect(() => {
+    fetch("/api/configs")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data?.configIDs)) {
+          setAvailableConfigs(data.configIDs);
+          if (data.configIDs.length > 0 && !data.configIDs.includes(configID)) {
+            setConfigID(data.configIDs[0]);
+          }
+        }
+      })
+      .catch(() => { /* ignore – user can still type manually */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const weekOptions = useMemo(() => {
     const values = new Set<number>();
@@ -359,13 +375,17 @@ export default function DashboardPage() {
         </p>
         <div className="mt-4 grid gap-3 sm:grid-cols-[220px_1fr] items-center">
           <label htmlFor="configID" className="font-medium">Config ID</label>
-          <input
+          <select
             id="configID"
             value={configID}
             onChange={(e) => setConfigID(e.target.value)}
             className="rounded-md border border-foreground/20 bg-background px-3 py-2"
-            placeholder="default"
-          />
+          >
+            {availableConfigs.length === 0 && <option value={configID}>{configID}</option>}
+            {availableConfigs.map((id) => (
+              <option key={id} value={id}>{id}</option>
+            ))}
+          </select>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           <button onClick={handleGetConfig} disabled={isLoading} className="rounded-md bg-foreground px-4 py-2 text-background disabled:opacity-50">Load Config</button>

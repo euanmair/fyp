@@ -28,13 +28,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ email
     const values: Record<string, AttributeValue> = {
       ":updatedAt": { S: new Date().toISOString() },
     };
+    const names: Record<string, string> = {};
 
     if (role) {
       if (!["staff", "manager", "admin"].includes(role)) {
         return NextResponse.json({ message: "Invalid role." }, { status: 400 });
       }
-      updates.push("role = :role");
+      updates.push("#role = :role");
       values[":role"] = { S: role };
+      names["#role"] = "role";
     }
 
     if (!safeOptionalID(organisationID)) {
@@ -55,6 +57,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ email
       Key: { email: { S: decodeURIComponent(email).toLowerCase() } },
       UpdateExpression: `SET ${updates.join(", ")}`,
       ExpressionAttributeValues: values,
+      ...(Object.keys(names).length > 0 ? { ExpressionAttributeNames: names } : {}),
     }));
 
     return NextResponse.json({ message: "User updated." });

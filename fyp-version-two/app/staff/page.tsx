@@ -25,6 +25,7 @@ export default function StaffRotaPage() {
   const [schedules, setSchedules] = useState<ScheduleSummary[]>([]);
   const [selectedScheduleID, setSelectedScheduleID] = useState('');
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [userShiftCounts, setUserShiftCounts] = useState<Record<string, number>>({});
   const [status, setStatus] = useState('Loading your rota...');
   const [error, setError] = useState('');
 
@@ -41,6 +42,7 @@ export default function StaffRotaPage() {
 
       const nextAssignments = Array.isArray(data?.schedule?.assignments) ? data.schedule.assignments : [];
       setAssignments(nextAssignments);
+      setUserShiftCounts((prev) => ({ ...prev, [scheduleID]: nextAssignments.length }));
       setStatus(nextAssignments.length > 0 ? 'Your rota is up to date.' : 'No shifts assigned in this schedule.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unexpected schedule detail error.');
@@ -109,7 +111,7 @@ export default function StaffRotaPage() {
                       <div className="text-xs font-mono">{schedule.weekStartDate || 'n/a'}</div>
                       <div className="text-[11px] text-foreground/60">{schedule.scheduleID.slice(0, 8)}</div>
                     </td>
-                    <td className="px-2 py-2">{Number(schedule.resultSummary?.assignmentCount || 0)}</td>
+                    <td className="px-2 py-2">{userShiftCounts[schedule.scheduleID] ?? '—'}</td>
                   </tr>
                 ))}
                 {schedules.length === 0 ? (
