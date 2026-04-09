@@ -47,9 +47,15 @@ variable "lambda_patch_config_function_name" {
 }
 
 variable "alb_ingress_cidrs" {
-  description = "CIDR ranges allowed to reach the ALB (set to Cloudflare ranges in production)"
+  description = "IPv4 CIDR ranges allowed to reach the ALB (set to Cloudflare ranges in production)"
   type        = list(string)
   default     = ["0.0.0.0/0"]
+}
+
+variable "alb_ingress_ipv6_cidrs" {
+  description = "IPv6 CIDR ranges allowed to reach the ALB (Cloudflare IPv6 ranges)"
+  type        = list(string)
+  default     = []
 }
 
 variable "alb_certificate_arn" {
