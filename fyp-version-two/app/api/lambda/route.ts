@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import { jwtVerify } from "jose";
+import { canManageSchedules, isAdmin, type SessionClaims } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -25,8 +26,8 @@ const functionByAction: Record<LambdaAction, string> = {
 
 export async function POST(request: Request) {
   try {
-    const isAuthed = await isAuthenticated();
-    if (!isAuthed) {
+    const session = await getSession();
+    if (!session) {
       return NextResponse.json({ message: "Unauthorised" }, { status: 401 });
     }
 
@@ -38,8 +39,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Invalid action." }, { status: 400 });
     }
 
+    if ((action === "generateSchedule" || action === "upsertConfig" || action === "patchConfig") && !canManageSchedules(session.role)) {
+      return NextResponse.json({ message: "Forbidden: manager or admin role required." }, { status: 403 });
+    }
+
+    if ((action === "upsertConfig" || action === "patchConfig") && !isAdmin(session.role) && session.role !== "manager") {
+      return NextResponse.json({ message: "Forbidden: insufficient permissions." }, { status: 403 });
+    }
+
+    if (!session.organisationID && (action === "generateSchedule" || action === "getConfig" || action === "upsertConfig" || action === "patchConfig")) {
+      return NextResponse.json({ message: "Organisation membership required." }, { status: 400 });
+    }
+
     const functionName = functionByAction[action as LambdaAction];
-    const lambdaResult = await invokeLambda(functionName, payload ?? {});
+    const lambdaResult = await invokeLambda(functionName, {
+      ...(payload ?? {}),
+      organisationID: session.organisationID,
+      requestedBy: {
+        userId: session.userId,
+        role: session.role,
+        email: session.email,
+        staffID: session.staffID,
+      },
+    });
 
     return NextResponse.json(
       {
@@ -61,17 +83,27 @@ export async function POST(request: Request) {
   }
 }
 
-async function isAuthenticated() {
+async function getSession(): Promise<SessionClaims | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get("auth-token")?.value;
-  if (!token) return false;
+  if (!token) return null;
 
   try {
     const secret = new TextEncoder().encode(jwtSecret);
-    await jwtVerify(token, secret);
-    return true;
+    const { payload } = await jwtVerify(token, secret);
+    return {
+      userId: String(payload?.userId || ""),
+      email: String(payload?.email || ""),
+      role: String(payload?.role || "staff") === "admin"
+        ? "admin"
+        : String(payload?.role || "staff") === "manager"
+          ? "manager"
+          : "staff",
+      organisationID: payload?.organisationID ? String(payload.organisationID) : null,
+      staffID: payload?.staffID ? String(payload.staffID) : null,
+    };
   } catch {
-    return false;
+    return null;
   }
 }
 

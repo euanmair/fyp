@@ -1,31 +1,25 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { jwtVerify } from "jose";
-
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
+import { getSessionClaimsFromCookies, canManageSchedules, isAdmin } from "@/lib/auth";
 
 type Session = {
   email: string;
+  role: "staff" | "manager" | "admin";
+  organisationID: string | null;
 } | null;
 
 async function getSession(): Promise<Session> {
-  // Validate the auth cookie server-side so navigation behaviour reflects sign-in state.
-  const cookieStore = await cookies();
-  const token = cookieStore.get("auth-token")?.value;
-  if (!token) {
+  const claims = await getSessionClaimsFromCookies();
+  if (!claims) {
     return null;
   }
 
-  try {
-    const secret = new TextEncoder().encode(JWT_SECRET);
-    const { payload } = await jwtVerify(token, secret);
-    return {
-      email: String(payload?.email || ""),
-    };
-  } catch {
-    return null;
-  }
+  return {
+    email: claims.email,
+    role: claims.role,
+    organisationID: claims.organisationID,
+  };
 }
 
 export default async function NavRail() {
@@ -53,7 +47,21 @@ export default async function NavRail() {
           <p className="text-xs uppercase tracking-wide text-foreground/60">Navigation</p>
           <nav className="mt-3 flex flex-col gap-2">
             <Link className="rounded-md border border-foreground/20 px-3 py-2 text-sm hover:bg-foreground hover:text-background" href="/">Home</Link>
-            <Link className="rounded-md border border-foreground/20 px-3 py-2 text-sm hover:bg-foreground hover:text-background" href="/dashboard">Dashboard</Link>
+            {session && canManageSchedules(session.role) ? (
+              <Link className="rounded-md border border-foreground/20 px-3 py-2 text-sm hover:bg-foreground hover:text-background" href="/dashboard">Schedule Generator</Link>
+            ) : null}
+            {session && canManageSchedules(session.role) ? (
+              <Link className="rounded-md border border-foreground/20 px-3 py-2 text-sm hover:bg-foreground hover:text-background" href="/dashboard/history">Schedule History</Link>
+            ) : null}
+            {session ? (
+              <Link className="rounded-md border border-foreground/20 px-3 py-2 text-sm hover:bg-foreground hover:text-background" href="/staff">My Rota</Link>
+            ) : null}
+            {session ? (
+              <Link className="rounded-md border border-foreground/20 px-3 py-2 text-sm hover:bg-foreground hover:text-background" href="/join-organisation">Join Organisation</Link>
+            ) : null}
+            {session && isAdmin(session.role) ? (
+              <Link className="rounded-md border border-foreground/20 px-3 py-2 text-sm hover:bg-foreground hover:text-background" href="/admin">Admin</Link>
+            ) : null}
             {session ? (
               <form action={logout}>
                 <button
@@ -68,7 +76,7 @@ export default async function NavRail() {
             )}
           </nav>
           <p className="mt-3 text-xs text-foreground/60">
-            {session?.email ? `Signed in as ${session.email}` : "Not signed in"}
+            {session?.email ? `Signed in as ${session.email} (${session.role}${session.organisationID ? `, ${session.organisationID}` : ""})` : "Not signed in"}
           </p>
         </div>
       </div>

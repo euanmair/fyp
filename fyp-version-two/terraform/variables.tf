@@ -45,3 +45,33 @@ variable "lambda_patch_config_function_name" {
   type        = string
   default     = "nursery-config-patch"
 }
+
+variable "alb_ingress_cidrs" {
+  description = "CIDR ranges allowed to reach the ALB (set to Cloudflare ranges in production)"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "alb_certificate_arn" {
+  description = "ACM certificate ARN for HTTPS listener on ALB"
+  type        = string
+  default     = ""
+}
+
+variable "enable_waf" {
+  description = "Enable WAF in front of ALB"
+  type        = bool
+  default     = true
+}
+
+variable "waf_rate_limit" {
+  description = "Rate limit per 5-minute period per IP"
+  type        = number
+  default     = 2000
+}
+
+variable "jwt_secret_name" {
+  description = "Name of Secrets Manager secret storing JWT secret string"
+  type        = string
+  default     = "nursery-app-jwt-secret"
+}

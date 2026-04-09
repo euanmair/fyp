@@ -8,11 +8,15 @@ import bcrypt from 'bcryptjs';
 import { SignJWT } from 'jose';
 import { createHash, randomUUID } from 'crypto';
 import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { getSessionClaimsFromCookies, type AccountRole } from '@/lib/auth';
 
 interface User {
   id: string;
   email: string;
   passwordHash: string;
+  role: AccountRole;
+  organisationID?: string;
+  staffID?: string;
   createdAt?: string;
   resetTokenHash?: string;
   resetTokenExpiresAt?: string;
@@ -26,6 +30,22 @@ const dynamoClient = new DynamoDBClient({ region: AWS_REGION });
 
 function normaliseEmail(value: string) {
   return value.trim().toLowerCase();
+}
+
+function normaliseOptionalText(value: string | null | undefined) {
+  const trimmed = String(value || '').trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normaliseRole(value: string | null | undefined): AccountRole {
+  const role = String(value || 'staff').trim().toLowerCase();
+  if (role === 'admin') return 'admin';
+  if (role === 'manager') return 'manager';
+  return 'staff';
+}
+
+function isSafeIdentifier(value: string) {
+  return /^[a-zA-Z0-9._-]{2,64}$/.test(value);
 }
 
 async function getUserByEmail(email: string): Promise<User | null> {
@@ -45,6 +65,9 @@ async function getUserByEmail(email: string): Promise<User | null> {
   const storedEmail = response.Item.email?.S;
   const passwordHash = response.Item.passwordHash?.S;
   const createdAt = response.Item.createdAt?.S;
+  const role = response.Item.role?.S;
+  const organisationID = response.Item.organisationID?.S;
+  const staffID = response.Item.staffID?.S;
   const resetTokenHash = response.Item.resetTokenHash?.S;
   const resetTokenExpiresAt = response.Item.resetTokenExpiresAt?.S;
 
@@ -56,6 +79,9 @@ async function getUserByEmail(email: string): Promise<User | null> {
     id,
     email: storedEmail,
     passwordHash,
+    role: role === 'admin' ? 'admin' : role === 'manager' ? 'manager' : 'staff',
+    organisationID,
+    staffID,
     createdAt,
     resetTokenHash,
     resetTokenExpiresAt,
@@ -67,8 +93,17 @@ async function saveUser(user: User) {
     email: { S: user.email },
     id: { S: user.id },
     passwordHash: { S: user.passwordHash },
+    role: { S: user.role || 'staff' },
     createdAt: { S: user.createdAt || new Date().toISOString() },
   };
+
+  if (user.organisationID) {
+    item.organisationID = { S: user.organisationID };
+  }
+
+  if (user.staffID) {
+    item.staffID = { S: user.staffID };
+  }
 
   if (user.resetTokenHash) {
     item.resetTokenHash = { S: user.resetTokenHash };
@@ -90,11 +125,14 @@ function hashResetToken(token: string) {
   return createHash('sha256').update(token).digest('hex');
 }
 
-async function setAuthCookie(user: { id: string; email: string }) {
+async function setAuthCookie(user: { id: string; email: string; role: AccountRole; organisationID?: string; staffID?: string }) {
   const secret = new TextEncoder().encode(JWT_SECRET);
   const token = await new SignJWT({
     userId: user.id,
     email: user.email,
+    role: user.role,
+    organisationID: user.organisationID || null,
+    staffID: user.staffID || null,
   })
     .setProtectedHeader({ alg: 'HS256' })
     .setExpirationTime('7d')
@@ -157,7 +195,13 @@ export async function loginUser(formData: FormData) {
       return { error: 'Invalid email or password' };
     }
 
-    await setAuthCookie({ id: user.id, email: user.email });
+    await setAuthCookie({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      organisationID: user.organisationID,
+      staffID: user.staffID,
+    });
 
     // Success - redirect will happen on client side
     return { success: true };
@@ -172,6 +216,9 @@ export async function registerUser(formData: FormData) {
   const email = normaliseEmail(formData.get('email') as string);
   const password = formData.get('password') as string;
   const confirmPassword = formData.get('confirmPassword') as string;
+  const role = normaliseRole(formData.get('role') as string);
+  const organisationID = normaliseOptionalText(formData.get('organisationID') as string);
+  const staffID = normaliseOptionalText(formData.get('staffID') as string);
 
   if (!email || !password || !confirmPassword) {
     return { error: 'Email, password and confirm password are required' };
@@ -187,6 +234,14 @@ export async function registerUser(formData: FormData) {
 
   if (password !== confirmPassword) {
     return { error: 'Passwords do not match' };
+  }
+
+  if (organisationID && !isSafeIdentifier(organisationID)) {
+    return { error: 'Organisation ID must be 2-64 characters and use letters, numbers, dot, underscore or hyphen.' };
+  }
+
+  if (staffID && !isSafeIdentifier(staffID)) {
+    return { error: 'Staff ID must be 2-64 characters and use letters, numbers, dot, underscore or hyphen.' };
   }
 
   try {
@@ -206,13 +261,16 @@ export async function registerUser(formData: FormData) {
           email: { S: email },
           id: { S: userId },
           passwordHash: { S: passwordHash },
+          role: { S: role },
           createdAt: { S: createdAt },
+          ...(organisationID ? { organisationID: { S: organisationID } } : {}),
+          ...(staffID ? { staffID: { S: staffID } } : {}),
         },
         ConditionExpression: 'attribute_not_exists(email)',
       })
     );
 
-    await setAuthCookie({ id: userId, email });
+    await setAuthCookie({ id: userId, email, role, organisationID, staffID });
 
     return { success: true, message: 'Account created successfully' };
   } catch (error) {
@@ -310,5 +368,55 @@ export async function resetPassword(formData: FormData) {
   } catch (error) {
     console.error('Reset password error:', error);
     return { error: 'Unable to reset password at this time' };
+  }
+}
+
+export async function joinOrganisation(formData: FormData) {
+  const session = await getSessionClaimsFromCookies();
+  if (!session?.email) {
+    return { error: 'You must be signed in to join an organisation.' };
+  }
+
+  const organisationID = normaliseOptionalText(formData.get('organisationID') as string);
+  const staffID = normaliseOptionalText(formData.get('staffID') as string);
+
+  if (!organisationID) {
+    return { error: 'Organisation ID is required.' };
+  }
+
+  if (!isSafeIdentifier(organisationID)) {
+    return { error: 'Organisation ID must be 2-64 characters and use letters, numbers, dot, underscore or hyphen.' };
+  }
+
+  if (staffID && !isSafeIdentifier(staffID)) {
+    return { error: 'Staff ID must be 2-64 characters and use letters, numbers, dot, underscore or hyphen.' };
+  }
+
+  try {
+    const user = await getUserByEmail(session.email);
+    if (!user) {
+      return { error: 'Account not found.' };
+    }
+
+    const nextUser: User = {
+      ...user,
+      organisationID,
+      staffID: staffID || user.staffID,
+    };
+
+    await saveUser(nextUser);
+
+    await setAuthCookie({
+      id: nextUser.id,
+      email: nextUser.email,
+      role: nextUser.role,
+      organisationID: nextUser.organisationID,
+      staffID: nextUser.staffID,
+    });
+
+    return { success: true, message: 'Organisation updated successfully.' };
+  } catch (error) {
+    console.error('Join organisation error:', error);
+    return { error: 'Unable to join organisation at this time.' };
   }
 }
