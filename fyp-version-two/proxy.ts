@@ -1,4 +1,4 @@
-// Import NextRequest and NextResponse from Next.js server module for middleware handling
+// Import NextRequest and NextResponse from Next.js server module for proxy handling
 import { NextRequest, NextResponse } from "next/server";
 
 // Import jwtVerify from jose library for JWT token verification
@@ -30,9 +30,9 @@ async function getToken(request: NextRequest) {
   }
 }
 
-// Main middleware function that runs on every request to protected routes
+// Main proxy function that runs on every request to protected routes
 // Handles authentication logic and route protection
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // Get the JWT token from cookies and verify it
   const token = await getToken(request);
 
@@ -85,11 +85,11 @@ export async function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
-// Configuration object that specifies which routes the middleware should run on
+// Configuration object that specifies which routes the proxy should run on
 // Uses regex pattern to match all routes EXCEPT api routes, Next.js internal resources, and favicon
 export const config = {
   // Matcher pattern that excludes:
-  // - /api/* (API routes don't need auth middleware)
+  // - /api/* (API routes don't need auth proxy)
   // - /_next/static/* (Static Next.js assets)
   // - /_next/image/* (Next.js image optimization)
   // - /favicon.ico (Favicon request)
