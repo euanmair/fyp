@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 type LambdaAction = "generateSchedule" | "getConfig" | "upsertConfig" | "patchConfig";
 
-const REQUIRED_AGE_BUCKETS = ["0-12", "12-24", "24-36"] as const;
+const REQUIRED_AGE_BUCKETS = ["0-24", "24-36", "36+"] as const;
 
 type Assignment = {
   week?: number;
@@ -58,14 +58,28 @@ type NurseryConfig = {
   childrenCount: Record<string, number>;
 };
 
+type ShortageSummary = {
+  daySegments?: number;
+  practitionerRequiredPerSegment?: number;
+  officeRequiredPerSegment?: number;
+  totalRequiredPerSegment?: number;
+  peakAvailablePractitionersPerSegment?: number;
+  peakAvailableOfficePerSegment?: number;
+  peakAvailableTotalPerSegment?: number;
+  totalAdditionalStaffNeeded?: number;
+  totalMissingPersonSlots?: number;
+  additionalPractitionersNeeded?: number;
+  additionalOfficeNeeded?: number;
+};
+
 const DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const STAFF_PAGE_SIZE = 8;
 
 const DEFAULT_CONFIG: NurseryConfig = {
   rooms: [
-    { roomID: "babies-0-12", roomName: "Babies 0-12 months", capacity: 12, ageGroup: "0-12", schedule: [], isOffice: false },
-    { roomID: "toddlers-12-24", roomName: "Toddlers 12-24 months", capacity: 14, ageGroup: "12-24", schedule: [], isOffice: false },
-    { roomID: "preschool-24-36", roomName: "Preschool 24-36 months", capacity: 16, ageGroup: "24-36", schedule: [], isOffice: false },
+    { roomID: "babies-0-24", roomName: "Babies 0-24 months", capacity: 12, ageGroup: "0-24", schedule: [], isOffice: false },
+    { roomID: "toddlers-24-36", roomName: "Toddlers 24-36 months", capacity: 16, ageGroup: "24-36", schedule: [], isOffice: false },
+    { roomID: "preschool-36-plus", roomName: "Preschool 36+ months", capacity: 18, ageGroup: "36+", schedule: [], isOffice: false },
     { roomID: "office", roomName: "Office", capacity: 2, ageGroup: "36+", schedule: [], isOffice: true }
   ],
   staff: [
@@ -84,7 +98,7 @@ const DEFAULT_CONFIG: NurseryConfig = {
     persistResult: true,
     forceGenerate: false,
   },
-  childrenCount: { "0-12": 3, "12-24": 4, "24-36": 5 }
+  childrenCount: { "0-24": 6, "24-36": 4, "36+": 5 }
 };
 
 export default function DashboardPage() {
@@ -131,9 +145,9 @@ export default function DashboardPage() {
 
   function ensureRequiredRooms(rooms: Room[]) {
     const baselineByBucket: Record<string, Room> = {
-      "0-12": { roomID: "babies-0-12", roomName: "Babies 0-12 months", capacity: 12, ageGroup: "0-12", schedule: [], isOffice: false },
-      "12-24": { roomID: "toddlers-12-24", roomName: "Toddlers 12-24 months", capacity: 14, ageGroup: "12-24", schedule: [], isOffice: false },
-      "24-36": { roomID: "preschool-24-36", roomName: "Preschool 24-36 months", capacity: 16, ageGroup: "24-36", schedule: [], isOffice: false },
+      "0-24": { roomID: "babies-0-24", roomName: "Babies 0-24 months", capacity: 12, ageGroup: "0-24", schedule: [], isOffice: false },
+      "24-36": { roomID: "toddlers-24-36", roomName: "Toddlers 24-36 months", capacity: 16, ageGroup: "24-36", schedule: [], isOffice: false },
+      "36+": { roomID: "preschool-36-plus", roomName: "Preschool 36+ months", capacity: 18, ageGroup: "36+", schedule: [], isOffice: false },
     };
 
     const nonOffice = rooms.filter((room) => !room.isOffice);
@@ -367,11 +381,31 @@ export default function DashboardPage() {
     const data = await response.json();
     if (!response.ok) {
       const message = data?.payload?.error || data?.payload?.message || data?.message || "Request failed";
-      const err = new Error(message) as Error & { shortage?: { totalAdditionalStaffNeeded?: number } };
+      const err = new Error(message) as Error & { shortage?: ShortageSummary };
       err.shortage = data?.payload?.shortage || data?.shortage;
       throw err;
     }
     return data;
+  }
+
+  function formatShortageMessage(shortage?: ShortageSummary | null) {
+    if (!shortage || (shortage.totalAdditionalStaffNeeded || 0) <= 0) {
+      return "";
+    }
+
+    const requiredPractitioners = shortage.practitionerRequiredPerSegment || 0;
+    const requiredOffice = shortage.officeRequiredPerSegment || 0;
+    const totalRequired = shortage.totalRequiredPerSegment || (requiredPractitioners + requiredOffice);
+    const availablePractitioners = shortage.peakAvailablePractitionersPerSegment ?? 0;
+    const availableOffice = shortage.peakAvailableOfficePerSegment ?? 0;
+    const totalAvailable = shortage.peakAvailableTotalPerSegment ?? (availablePractitioners + availableOffice);
+    const additionalTotal = shortage.totalAdditionalStaffNeeded || 0;
+    const additionalPractitioners = shortage.additionalPractitionersNeeded || 0;
+    const additionalOffice = shortage.additionalOfficeNeeded || 0;
+    const missingSlots = shortage.totalMissingPersonSlots || 0;
+    const segments = shortage.daySegments || 1;
+
+    return `Need ${totalRequired} staff per segment (${requiredPractitioners} practitioners + ${requiredOffice} office), but only ${totalAvailable} available at peak (${availablePractitioners} practitioners + ${availableOffice} office). Additional hires needed: ${additionalTotal} (${additionalPractitioners} practitioners + ${additionalOffice} office). Missing person-slots across rota: ${missingSlots} over ${segments} segment(s) per day.`;
   }
 
   async function handleGetConfig() {
@@ -405,11 +439,7 @@ export default function DashboardPage() {
       const data = await callLambda("generateSchedule", { configID, ...config });
       const payload = data?.payload;
       setLastPayload(payload);
-      if (payload?.shortage?.totalAdditionalStaffNeeded > 0) {
-        setShortageMessage(`Additional staff needed at peak segment: ${payload.shortage.totalAdditionalStaffNeeded}`);
-      } else {
-        setShortageMessage("");
-      }
+      setShortageMessage(formatShortageMessage(payload?.shortage));
       setLastSchedule(payload?.result || null);
       const weeks = new Set<number>();
       for (const item of payload?.result?.assignments || []) {
@@ -429,10 +459,8 @@ export default function DashboardPage() {
       await fn();
     } catch (err) {
       if (err && typeof err === "object" && "shortage" in err) {
-        const shortage = (err as { shortage?: { totalAdditionalStaffNeeded?: number } }).shortage;
-        if (shortage?.totalAdditionalStaffNeeded) {
-          setShortageMessage(`Additional staff needed at peak segment: ${shortage.totalAdditionalStaffNeeded}`);
-        }
+        const shortage = (err as { shortage?: ShortageSummary }).shortage;
+        setShortageMessage(formatShortageMessage(shortage));
       }
       setError(err instanceof Error ? err.message : "Unexpected error");
     } finally {

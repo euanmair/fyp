@@ -36,3 +36,4 @@ alb_ingress_ipv6_cidrs = [
 
 enable_waf     = true
 waf_rate_limit = 1500
+jwt_secret_name = "nursery-app-jwt-secret-v2"

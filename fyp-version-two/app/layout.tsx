@@ -35,7 +35,7 @@ export default function RootLayout({
       <body className="min-h-full bg-background text-foreground">
         <NavRail />
 
-        <div className="min-h-full pl-10 md:pl-14">
+        <div className="min-h-full pt-16 md:pt-0 md:pl-14">
           {children}
         </div>
       </body>

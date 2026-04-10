@@ -263,7 +263,7 @@ resource "aws_iam_instance_profile" "ec2_app_profile" {
 resource "aws_secretsmanager_secret" "jwt_secret" {
   name                    = var.jwt_secret_name
   description             = "JWT secret consumed by the Next.js app"
-  recovery_window_in_days = 7
+  recovery_window_in_days = 0
 }
 
 # Nursery scheduling Lambda function.

@@ -16,9 +16,8 @@ const dynamoClient = new DynamoDBClient({});
 
 // Default ratios for staffing (integer is assumed as 1:<value> ratio)
 const defaultStaffingRatios = {
-    "0-12": 3,
-    "12-24": 3,
-    "24-36": 4,
+    "0-24": 3,
+    "24-36": 5,
     "36+": 8
 };
 
@@ -184,7 +183,7 @@ function generateSchedule({ rooms, staff, settings, childrenCount }) {
         const shortage = estimateStaffShortage({ staff, settings, childrenCount, rooms });
         if (!forceGenerate) {
             const err = new Error(
-                `Insufficient staff to generate a compliant rota. Additional staff needed at peak segment: ${shortage.totalAdditionalStaffNeeded}.`
+                `Insufficient staff to generate a compliant rota. Required per segment: ${shortage.totalRequiredPerSegment} (${shortage.practitionerRequiredPerSegment} practitioners + ${shortage.officeRequiredPerSegment} office). Available at peak: ${shortage.peakAvailableTotalPerSegment} (${shortage.peakAvailablePractitionersPerSegment} practitioners + ${shortage.peakAvailableOfficePerSegment} office). Additional hires needed: ${shortage.totalAdditionalStaffNeeded}.`
             );
             err.shortage = shortage;
             throw err;
@@ -716,10 +715,22 @@ function estimateStaffShortage({ staff, settings, childrenCount, rooms }) {
     if (segmentsPerPerson === 0) segmentsPerPerson = 1;
 
     let peakAdditionalStaff = 0;
+    let peakAvailablePractitioners = 0;
+    let peakAvailableOffice = 0;
+    let totalMissingPractitionerSlots = 0;
+    let totalMissingOfficeSlots = 0;
+
     for (let week = 1; week <= planningWeeks; week += 1) {
         for (const day of workDays) {
             const availablePractitioners = practitionerStaff.filter((member) => !isStaffOnHoliday(member, day, week));
             const availableOffice = officeStaff.filter((member) => !isStaffOnHoliday(member, day, week));
+
+            if (availablePractitioners.length > peakAvailablePractitioners) {
+                peakAvailablePractitioners = availablePractitioners.length;
+            }
+            if (availableOffice.length > peakAvailableOffice) {
+                peakAvailableOffice = availableOffice.length;
+            }
 
             // Simulate segment-by-segment assignment respecting maxShiftHours so multi-segment
             // days are correctly accounted for (where one person cannot cover all segments).
@@ -763,6 +774,9 @@ function estimateStaffShortage({ staff, settings, childrenCount, rooms }) {
                 }
             }
 
+            totalMissingPractitionerSlots += pracMissing;
+            totalMissingOfficeSlots += officeMissing;
+
             // Convert missing person-slots into additional staff needed.
             const additionalPrac = Math.ceil(pracMissing / segmentsPerPerson);
             const additionalOffice = Math.ceil(officeMissing / segmentsPerPerson);
@@ -774,10 +788,21 @@ function estimateStaffShortage({ staff, settings, childrenCount, rooms }) {
         }
     }
 
+    const additionalPractitionersNeeded = Math.ceil(totalMissingPractitionerSlots / Math.max(segmentsPerPerson, 1));
+    const additionalOfficeNeeded = Math.ceil(totalMissingOfficeSlots / Math.max(segmentsPerPerson, 1));
+    const totalRequiredPerSegment = practitionerRequired + officeRequired;
+
     return {
         daySegments: daySegments.length,
         practitionerRequiredPerSegment: practitionerRequired,
         officeRequiredPerSegment: officeRequired,
+        totalRequiredPerSegment,
+        peakAvailablePractitionersPerSegment: peakAvailablePractitioners,
+        peakAvailableOfficePerSegment: peakAvailableOffice,
+        peakAvailableTotalPerSegment: peakAvailablePractitioners + peakAvailableOffice,
+        totalMissingPersonSlots: totalMissingPractitionerSlots + totalMissingOfficeSlots,
+        additionalPractitionersNeeded,
+        additionalOfficeNeeded,
         totalAdditionalStaffNeeded: peakAdditionalStaff,
     };
 }
