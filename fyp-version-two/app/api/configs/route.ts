@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { DynamoDBClient, ScanCommand } from "@aws-sdk/client-dynamodb";
+import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import { getSessionClaimsFromCookies } from "@/lib/auth";
 
 const region = process.env.AWS_REGION || "eu-north-1";
-const configTable = process.env.CONFIG_TABLE_NAME || "NurseryConfig";
-const dynamoClient = new DynamoDBClient({ region });
+const listConfigsFunction = process.env.AWS_LAMBDA_CONFIG_LIST_FUNCTION || "nursery-config-list";
+const lambdaClient = new LambdaClient({ region });
 
 export async function GET() {
   const session = await getSessionClaimsFromCookies();
@@ -16,27 +16,25 @@ export async function GET() {
     return NextResponse.json({ message: "Organisation membership required." }, { status: 400 });
   }
 
-  const prefix = `${session.organisationID}#`;
-
   try {
-    const response = await dynamoClient.send(new ScanCommand({
-      TableName: configTable,
-      FilterExpression: "begins_with(configID, :prefix)",
-      ExpressionAttributeValues: {
-        ":prefix": { S: prefix },
-      },
-      ProjectionExpression: "configID",
-    }));
+    const command = new InvokeCommand({
+      FunctionName: listConfigsFunction,
+      Payload: new TextEncoder().encode(JSON.stringify({
+        organisationID: session.organisationID,
+      })),
+    });
 
-    const configIDs = (response.Items || [])
-      .map((item) => {
-        const raw = item.configID?.S || "";
-        return raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
-      })
-      .filter(Boolean)
-      .sort();
+    const response = await lambdaClient.send(command);
+    const rawPayload = response.Payload ? new TextDecoder().decode(response.Payload) : "{}";
+    const parsed = JSON.parse(rawPayload);
 
-    return NextResponse.json({ configIDs });
+    if (response.FunctionError) {
+      console.error("GET /api/configs Lambda error:", parsed);
+      return NextResponse.json({ message: "Unable to fetch configs." }, { status: 502 });
+    }
+
+    const body = typeof parsed.body === "string" ? JSON.parse(parsed.body) : parsed;
+    return NextResponse.json({ configIDs: body.configIDs || [] });
   } catch (error) {
     console.error("GET /api/configs error:", error);
     return NextResponse.json({ message: "Unable to fetch configs." }, { status: 500 });

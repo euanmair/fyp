@@ -1,5 +1,5 @@
 // AWS SDK modules for DynamoDB interaction and UUID generation for unique IDs
-import { DynamoDBClient, PutItemCommand, GetItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, PutItemCommand, GetItemCommand, ScanCommand } from "@aws-sdk/client-dynamodb";
 import { v4 as uuidv4 } from "uuid";
 import Ajv from "ajv";
 
@@ -371,6 +371,44 @@ export const upsertNurseryConfigHandler = async (event) => {
         const statusCode = error?.name === "SyntaxError" ? 400 : 500;
         return createJsonResponse(statusCode, {
             message: statusCode === 400 ? "Invalid JSON payload." : "Internal Server Error",
+            error: error?.message || "Unknown error"
+        });
+    }
+};
+
+// Lambda function for Next.js: list all config IDs for an organisation.
+export const listNurseryConfigsHandler = async (event) => {
+    try {
+        const payload = parseEventPayload(event);
+        const organisationID = getOrganisationID(payload);
+        const prefix = `${organisationID}#`;
+
+        const response = await dynamoClient.send(new ScanCommand({
+            TableName: configTable,
+            FilterExpression: "begins_with(configID, :prefix)",
+            ExpressionAttributeValues: {
+                ":prefix": { S: prefix },
+            },
+            ProjectionExpression: "configID",
+        }));
+
+        const configIDs = (response.Items || [])
+            .map((item) => {
+                const raw = item.configID?.S || "";
+                return raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
+            })
+            .filter(Boolean)
+            .sort();
+
+        return createJsonResponse(200, {
+            message: "Config list retrieved successfully.",
+            organisationID,
+            configIDs,
+        });
+    } catch (error) {
+        console.error("Error listing nursery configs:", error);
+        return createJsonResponse(500, {
+            message: "Internal Server Error",
             error: error?.message || "Unknown error"
         });
     }

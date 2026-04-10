@@ -11,17 +11,19 @@ const schedulerFunction = process.env.AWS_LAMBDA_SCHEDULER_FUNCTION || "nursery-
 const getConfigFunction = process.env.AWS_LAMBDA_CONFIG_GET_FUNCTION || "nursery-config-get";
 const upsertConfigFunction = process.env.AWS_LAMBDA_CONFIG_UPSERT_FUNCTION || "nursery-config-upsert";
 const patchConfigFunction = process.env.AWS_LAMBDA_CONFIG_PATCH_FUNCTION || "nursery-config-patch";
+const listConfigsFunction = process.env.AWS_LAMBDA_CONFIG_LIST_FUNCTION || "nursery-config-list";
 const jwtSecret = process.env.JWT_SECRET || "your-secret-key-change-in-production";
 
 const lambdaClient = new LambdaClient({ region });
 
-type LambdaAction = "generateSchedule" | "getConfig" | "upsertConfig" | "patchConfig";
+type LambdaAction = "generateSchedule" | "getConfig" | "upsertConfig" | "patchConfig" | "listConfigs";
 
 const functionByAction: Record<LambdaAction, string> = {
   generateSchedule: schedulerFunction,
   getConfig: getConfigFunction,
   upsertConfig: upsertConfigFunction,
   patchConfig: patchConfigFunction,
+  listConfigs: listConfigsFunction,
 };
 
 export async function POST(request: Request) {
@@ -47,7 +49,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Forbidden: insufficient permissions." }, { status: 403 });
     }
 
-    if (!session.organisationID && (action === "generateSchedule" || action === "getConfig" || action === "upsertConfig" || action === "patchConfig")) {
+    if (!session.organisationID && (action === "generateSchedule" || action === "getConfig" || action === "upsertConfig" || action === "patchConfig" || action === "listConfigs")) {
       return NextResponse.json({ message: "Organisation membership required." }, { status: 400 });
     }
 

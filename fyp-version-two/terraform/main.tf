@@ -183,6 +183,15 @@ resource "aws_iam_role_policy" "lambda_dynamodb_policy" {
           aws_dynamodb_table.NurseryConfig.arn,
           aws_dynamodb_table.NurseryOrganisations.arn
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:Scan"
+        ]
+        Resource = [
+          aws_dynamodb_table.NurseryConfig.arn
+        ]
       }
     ]
   })
@@ -239,7 +248,8 @@ resource "aws_iam_role_policy" "ec2_app_policy" {
           aws_lambda_function.nursery_scheduler.arn,
           aws_lambda_function.nursery_config_get.arn,
           aws_lambda_function.nursery_config_upsert.arn,
-          aws_lambda_function.nursery_config_patch.arn
+          aws_lambda_function.nursery_config_patch.arn,
+          aws_lambda_function.nursery_config_list.arn
         ]
       },
       {
@@ -324,6 +334,32 @@ resource "aws_lambda_function" "nursery_config_upsert" {
   role             = aws_iam_role.lambda_role.arn
   runtime          = "nodejs20.x"
   handler          = "index_prod.upsertNurseryConfigHandler"
+  filename         = data.archive_file.scheduler_lambda_zip.output_path
+  source_code_hash = data.archive_file.scheduler_lambda_zip.output_base64sha256
+  timeout          = 30
+  memory_size      = 512
+
+  environment {
+    variables = {
+      SCHEDULE_TABLE_NAME      = aws_dynamodb_table.NurserySchedules.name
+      STAGE_HISTORY_TABLE_NAME = aws_dynamodb_table.NurseryScheduleHistory.name
+      CONFIG_TABLE_NAME        = aws_dynamodb_table.NurseryConfig.name
+      PERSIST_SCHEDULES        = tostring(var.persist_schedules)
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_basic_execution,
+    aws_iam_role_policy.lambda_dynamodb_policy
+  ]
+}
+
+# Lambda function for listing config IDs scoped to an organisation.
+resource "aws_lambda_function" "nursery_config_list" {
+  function_name    = var.lambda_list_configs_function_name
+  role             = aws_iam_role.lambda_role.arn
+  runtime          = "nodejs20.x"
+  handler          = "index_prod.listNurseryConfigsHandler"
   filename         = data.archive_file.scheduler_lambda_zip.output_path
   source_code_hash = data.archive_file.scheduler_lambda_zip.output_base64sha256
   timeout          = 30

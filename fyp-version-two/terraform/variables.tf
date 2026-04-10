@@ -46,6 +46,12 @@ variable "lambda_patch_config_function_name" {
   default     = "nursery-config-patch"
 }
 
+variable "lambda_list_configs_function_name" {
+  description = "Name of the Lambda that lists config IDs for an organisation"
+  type        = string
+  default     = "nursery-config-list"
+}
+
 variable "alb_ingress_cidrs" {
   description = "IPv4 CIDR ranges allowed to reach the ALB (set to Cloudflare ranges in production)"
   type        = list(string)
