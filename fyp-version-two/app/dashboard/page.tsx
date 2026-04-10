@@ -84,6 +84,7 @@ const DEFAULT_CONFIG: NurseryConfig = {
 export default function DashboardPage() {
   const [configID, setConfigID] = useState("default");
   const [availableConfigs, setAvailableConfigs] = useState<string[]>([]);
+  const [newConfigName, setNewConfigName] = useState("");
   const [config, setConfig] = useState<NurseryConfig>(DEFAULT_CONFIG);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -95,6 +96,17 @@ export default function DashboardPage() {
   const [selectedWeek, setSelectedWeek] = useState(1);
   const [staffSearch, setStaffSearch] = useState("");
   const [visibleStaffRows, setVisibleStaffRows] = useState(STAFF_PAGE_SIZE);
+
+  function refreshConfigs() {
+    fetch("/api/configs")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data?.configIDs)) {
+          setAvailableConfigs(data.configIDs);
+        }
+      })
+      .catch(() => {});
+  }
 
   useEffect(() => {
     fetch("/api/configs")
@@ -110,6 +122,20 @@ export default function DashboardPage() {
       .catch(() => { /* ignore – user can still type manually */ });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function addNewConfig() {
+    const name = newConfigName.trim();
+    if (!name) return;
+    if (availableConfigs.includes(name)) {
+      setConfigID(name);
+      setNewConfigName("");
+      return;
+    }
+    setAvailableConfigs((prev) => [...prev, name].sort());
+    setConfigID(name);
+    setNewConfigName("");
+    setStatusMessage(`Config "${name}" selected. Save or generate to persist it.`);
+  }
 
   const weekOptions = useMemo(() => {
     const values = new Set<number>();
@@ -323,6 +349,7 @@ export default function DashboardPage() {
         setConfig(normaliseConfig(payload.config));
       }
       setStatusMessage(payload?.message || "Config saved.");
+      refreshConfigs();
     });
   }
 
@@ -375,17 +402,34 @@ export default function DashboardPage() {
         </p>
         <div className="mt-4 grid gap-3 sm:grid-cols-[220px_1fr] items-center">
           <label htmlFor="configID" className="font-medium">Config ID</label>
-          <select
-            id="configID"
-            value={configID}
-            onChange={(e) => setConfigID(e.target.value)}
-            className="rounded-md border border-foreground/20 bg-background px-3 py-2"
-          >
-            {availableConfigs.length === 0 && <option value={configID}>{configID}</option>}
-            {availableConfigs.map((id) => (
-              <option key={id} value={id}>{id}</option>
-            ))}
-          </select>
+          <div className="flex gap-2 flex-wrap">
+            <select
+              id="configID"
+              value={configID}
+              onChange={(e) => setConfigID(e.target.value)}
+              className="rounded-md border border-foreground/20 bg-background px-3 py-2"
+            >
+              {availableConfigs.length === 0 && <option value={configID}>{configID}</option>}
+              {availableConfigs.map((id) => (
+                <option key={id} value={id}>{id}</option>
+              ))}
+            </select>
+            <input
+              value={newConfigName}
+              onChange={(e) => setNewConfigName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") addNewConfig(); }}
+              placeholder="New config name"
+              className="rounded-md border border-foreground/20 bg-background px-3 py-2 text-sm"
+            />
+            <button
+              type="button"
+              onClick={addNewConfig}
+              disabled={!newConfigName.trim()}
+              className="rounded-md border border-foreground/30 px-3 py-2 text-sm disabled:opacity-40"
+            >
+              Add
+            </button>
+          </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           <button onClick={handleGetConfig} disabled={isLoading} className="rounded-md bg-foreground px-4 py-2 text-background disabled:opacity-50">Load Config</button>

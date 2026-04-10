@@ -703,14 +703,72 @@ function estimateStaffShortage({ staff, settings, childrenCount, rooms }) {
     const practitionerStaff = (staff || []).filter((member) => !member.isOffice);
     const officeStaff = (staff || []).filter((member) => member.isOffice);
 
-    let peakMissing = 0;
+    // Work out how many segments one fresh staff member can cover in a day.
+    let segmentsPerPerson = 0;
+    let segHoursUsed = 0;
+    for (const seg of daySegments) {
+        if (!Number.isFinite(maxShiftHours) || maxShiftHours <= 0 || (segHoursUsed + seg.hours) <= maxShiftHours) {
+            segmentsPerPerson += 1;
+            segHoursUsed += seg.hours;
+        }
+    }
+    if (segmentsPerPerson === 0) segmentsPerPerson = 1;
+
+    let peakAdditionalStaff = 0;
     for (let week = 1; week <= planningWeeks; week += 1) {
         for (const day of workDays) {
-            const availablePractitioners = practitionerStaff.filter((member) => !isStaffOnHoliday(member, day, week)).length;
-            const availableOffice = officeStaff.filter((member) => !isStaffOnHoliday(member, day, week)).length;
-            const missingThisSegment = Math.max(0, practitionerRequired - availablePractitioners) + Math.max(0, officeRequired - availableOffice);
-            if (missingThisSegment > peakMissing) {
-                peakMissing = missingThisSegment;
+            const availablePractitioners = practitionerStaff.filter((member) => !isStaffOnHoliday(member, day, week));
+            const availableOffice = officeStaff.filter((member) => !isStaffOnHoliday(member, day, week));
+
+            // Simulate segment-by-segment assignment respecting maxShiftHours so multi-segment
+            // days are correctly accounted for (where one person cannot cover all segments).
+            const pracDayHours = new Map(availablePractitioners.map((m) => [m.staffID, 0]));
+            const officeDayHours = new Map(availableOffice.map((m) => [m.staffID, 0]));
+            let pracMissing = 0;
+            let officeMissing = 0;
+
+            for (const segment of daySegments) {
+                // Practitioners eligible for this segment (not yet over daily cap).
+                const eligiblePrac = availablePractitioners.filter((m) => {
+                    if (!Number.isFinite(maxShiftHours) || maxShiftHours <= 0) return true;
+                    return (pracDayHours.get(m.staffID) || 0) + segment.hours <= maxShiftHours;
+                });
+                const pracAssign = Math.min(eligiblePrac.length, practitionerRequired);
+                pracMissing += Math.max(0, practitionerRequired - eligiblePrac.length);
+
+                // Greedily assign least-loaded practitioners to simulate realistic coverage.
+                const sortedPrac = [...eligiblePrac].sort((a, b) =>
+                    (pracDayHours.get(a.staffID) || 0) - (pracDayHours.get(b.staffID) || 0)
+                );
+                for (let i = 0; i < pracAssign; i++) {
+                    const m = sortedPrac[i];
+                    pracDayHours.set(m.staffID, (pracDayHours.get(m.staffID) || 0) + segment.hours);
+                }
+
+                // Office staff eligible for this segment.
+                const eligibleOffice = availableOffice.filter((m) => {
+                    if (!Number.isFinite(maxShiftHours) || maxShiftHours <= 0) return true;
+                    return (officeDayHours.get(m.staffID) || 0) + segment.hours <= maxShiftHours;
+                });
+                const officeAssign = Math.min(eligibleOffice.length, officeRequired);
+                officeMissing += Math.max(0, officeRequired - eligibleOffice.length);
+
+                const sortedOffice = [...eligibleOffice].sort((a, b) =>
+                    (officeDayHours.get(a.staffID) || 0) - (officeDayHours.get(b.staffID) || 0)
+                );
+                for (let i = 0; i < officeAssign; i++) {
+                    const m = sortedOffice[i];
+                    officeDayHours.set(m.staffID, (officeDayHours.get(m.staffID) || 0) + segment.hours);
+                }
+            }
+
+            // Convert missing person-slots into additional staff needed.
+            const additionalPrac = Math.ceil(pracMissing / segmentsPerPerson);
+            const additionalOffice = Math.ceil(officeMissing / segmentsPerPerson);
+            const totalAdditional = additionalPrac + additionalOffice;
+
+            if (totalAdditional > peakAdditionalStaff) {
+                peakAdditionalStaff = totalAdditional;
             }
         }
     }
@@ -719,7 +777,7 @@ function estimateStaffShortage({ staff, settings, childrenCount, rooms }) {
         daySegments: daySegments.length,
         practitionerRequiredPerSegment: practitionerRequired,
         officeRequiredPerSegment: officeRequired,
-        totalAdditionalStaffNeeded: peakMissing,
+        totalAdditionalStaffNeeded: peakAdditionalStaff,
     };
 }
 
