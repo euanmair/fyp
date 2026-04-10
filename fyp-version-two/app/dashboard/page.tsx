@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 
 type LambdaAction = "generateSchedule" | "getConfig" | "upsertConfig" | "patchConfig";
 
+const REQUIRED_AGE_BUCKETS = ["0-12", "12-24", "24-36"] as const;
+
 type Assignment = {
   week?: number;
   day?: string;
@@ -13,6 +15,9 @@ type Assignment = {
   roomName?: string;
   staffID?: string;
   staffName?: string;
+  ageGroup?: string;
+  legalRatio?: string;
+  unfilled?: boolean;
 };
 
 type StaffMember = {
@@ -58,8 +63,9 @@ const STAFF_PAGE_SIZE = 8;
 
 const DEFAULT_CONFIG: NurseryConfig = {
   rooms: [
-    { roomID: "babies", roomName: "Babies", capacity: 12, ageGroup: "0-24", schedule: [], isOffice: false },
-    { roomID: "toddlers", roomName: "Toddlers", capacity: 16, ageGroup: "24-36", schedule: [], isOffice: false },
+    { roomID: "babies-0-12", roomName: "Babies 0-12 months", capacity: 12, ageGroup: "0-12", schedule: [], isOffice: false },
+    { roomID: "toddlers-12-24", roomName: "Toddlers 12-24 months", capacity: 14, ageGroup: "12-24", schedule: [], isOffice: false },
+    { roomID: "preschool-24-36", roomName: "Preschool 24-36 months", capacity: 16, ageGroup: "24-36", schedule: [], isOffice: false },
     { roomID: "office", roomName: "Office", capacity: 2, ageGroup: "36+", schedule: [], isOffice: true }
   ],
   staff: [
@@ -78,7 +84,7 @@ const DEFAULT_CONFIG: NurseryConfig = {
     persistResult: true,
     forceGenerate: false,
   },
-  childrenCount: { "0-24": 3, "24-36": 4 }
+  childrenCount: { "0-12": 3, "12-24": 4, "24-36": 5 }
 };
 
 export default function DashboardPage() {
@@ -123,18 +129,52 @@ export default function DashboardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function addNewConfig() {
+  function ensureRequiredRooms(rooms: Room[]) {
+    const baselineByBucket: Record<string, Room> = {
+      "0-12": { roomID: "babies-0-12", roomName: "Babies 0-12 months", capacity: 12, ageGroup: "0-12", schedule: [], isOffice: false },
+      "12-24": { roomID: "toddlers-12-24", roomName: "Toddlers 12-24 months", capacity: 14, ageGroup: "12-24", schedule: [], isOffice: false },
+      "24-36": { roomID: "preschool-24-36", roomName: "Preschool 24-36 months", capacity: 16, ageGroup: "24-36", schedule: [], isOffice: false },
+    };
+
+    const nonOffice = rooms.filter((room) => !room.isOffice);
+    const office = rooms.filter((room) => room.isOffice);
+    const next: Room[] = [];
+
+    for (const bucket of REQUIRED_AGE_BUCKETS) {
+      const existing = nonOffice.find((room) => room.ageGroup === bucket);
+      next.push(existing ?? baselineByBucket[bucket]);
+    }
+
+    return [...next, ...office];
+  }
+
+  async function addNewConfig() {
     const name = newConfigName.trim();
     if (!name) return;
+
+    setError("");
+
     if (availableConfigs.includes(name)) {
       setConfigID(name);
       setNewConfigName("");
       return;
     }
-    setAvailableConfigs((prev) => [...prev, name].sort());
-    setConfigID(name);
-    setNewConfigName("");
-    setStatusMessage(`Config "${name}" selected. Save or generate to persist it.`);
+
+    setIsLoading(true);
+    setStatusMessage(`Creating config "${name}"...`);
+    try {
+      await callLambda("upsertConfig", { configID: name, ...config });
+      setAvailableConfigs((prev) => [...prev, name].sort());
+      setConfigID(name);
+      setNewConfigName("");
+      setStatusMessage(`Config "${name}" saved.`);
+      refreshConfigs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create config");
+      setStatusMessage("Unable to create config.");
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   const weekOptions = useMemo(() => {
@@ -196,8 +236,17 @@ export default function DashboardPage() {
 
   function normaliseConfig(raw: unknown): NurseryConfig {
     const candidate = (raw || {}) as Partial<NurseryConfig>;
+    const incomingChildrenCount = typeof candidate.childrenCount === "object" && candidate.childrenCount !== null
+      ? candidate.childrenCount
+      : {};
+    const requiredChildrenCount = Object.fromEntries(
+      REQUIRED_AGE_BUCKETS.map((bucket) => [bucket, Number(incomingChildrenCount[bucket] ?? DEFAULT_CONFIG.childrenCount[bucket] ?? 0)])
+    ) as Record<string, number>;
+
+    const candidateRooms = Array.isArray(candidate.rooms) ? candidate.rooms as Room[] : DEFAULT_CONFIG.rooms;
+
     return {
-      rooms: Array.isArray(candidate.rooms) ? candidate.rooms as Room[] : DEFAULT_CONFIG.rooms,
+      rooms: ensureRequiredRooms(candidateRooms),
       staff: Array.isArray(candidate.staff) ? candidate.staff as StaffMember[] : DEFAULT_CONFIG.staff,
       settings: {
         planningWeeks: Number(candidate.settings?.planningWeeks ?? DEFAULT_CONFIG.settings.planningWeeks),
@@ -210,9 +259,7 @@ export default function DashboardPage() {
         persistResult: Boolean(candidate.settings?.persistResult ?? DEFAULT_CONFIG.settings.persistResult),
         forceGenerate: Boolean(candidate.settings?.forceGenerate ?? DEFAULT_CONFIG.settings.forceGenerate),
       },
-      childrenCount: typeof candidate.childrenCount === "object" && candidate.childrenCount !== null
-        ? Object.fromEntries(Object.entries(candidate.childrenCount).map(([k, v]) => [k, Number(v)]))
-        : DEFAULT_CONFIG.childrenCount,
+      childrenCount: requiredChildrenCount,
     };
   }
 
@@ -424,7 +471,7 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={addNewConfig}
-              disabled={!newConfigName.trim()}
+              disabled={isLoading || !newConfigName.trim()}
               className="rounded-md border border-foreground/30 px-3 py-2 text-sm disabled:opacity-40"
             >
               Add

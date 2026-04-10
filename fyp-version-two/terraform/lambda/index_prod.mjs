@@ -16,7 +16,8 @@ const dynamoClient = new DynamoDBClient({});
 
 // Default ratios for staffing (integer is assumed as 1:<value> ratio)
 const defaultStaffingRatios = {
-    "0-24": 3,
+    "0-12": 3,
+    "12-24": 3,
     "24-36": 4,
     "36+": 8
 };
