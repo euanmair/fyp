@@ -182,8 +182,10 @@ function generateSchedule({ rooms, staff, settings, childrenCount }) {
     } catch {
         const shortage = estimateStaffShortage({ staff, settings, childrenCount, rooms });
         if (!forceGenerate) {
+            const totalPracNeeded = shortage.practitionerRequiredPerSegment + shortage.additionalPractitionersNeeded;
+            const totalOfficeNeeded = shortage.officeRequiredPerSegment + shortage.additionalOfficeNeeded;
             const err = new Error(
-                `Insufficient staff to generate a compliant rota. Required per segment: ${shortage.totalRequiredPerSegment} (${shortage.practitionerRequiredPerSegment} practitioners + ${shortage.officeRequiredPerSegment} office). Available at peak: ${shortage.peakAvailableTotalPerSegment} (${shortage.peakAvailablePractitionersPerSegment} practitioners + ${shortage.peakAvailableOfficePerSegment} office). Additional hires needed: ${shortage.totalAdditionalStaffNeeded}.`
+                `Insufficient staff to generate a compliant rota. You need a total of ${totalPracNeeded} practitioners and ${totalOfficeNeeded} office staff. Currently available: ${shortage.peakAvailablePractitionersPerSegment} practitioners and ${shortage.peakAvailableOfficePerSegment} office. Hire ${shortage.additionalPractitionersNeeded} more practitioner(s) and ${shortage.additionalOfficeNeeded} more office staff to meet requirements.`
             );
             err.shortage = shortage;
             throw err;

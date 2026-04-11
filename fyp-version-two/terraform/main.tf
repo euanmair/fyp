@@ -497,10 +497,16 @@ resource "aws_instance" "app_server" {
     Environment=NODE_ENV=production
     Environment=AWS_REGION=${var.aws_region}
     Environment=JWT_SECRET=$JWT_SECRET_VALUE
+    Environment=INVITE_CODE=${var.invite_code}
 
     [Install]
     WantedBy=multi-user.target
     SERVICE
+
+    # Below cronjob is now confirmed working - Euan Mair 24/03/2026
+    cat <<CRON >/etc/cron.d/repo-sync
+    */5 * * * * root cd /opt/app/fyp-version-two && /usr/bin/git pull origin main && npm install && npm run build && systemctl restart nodeapp.service >> /var/log/repo-sync.log 2>&1
+    CRON
 
     systemctl daemon-reload
     systemctl enable nodeapp

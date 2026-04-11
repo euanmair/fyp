@@ -395,17 +395,23 @@ export default function DashboardPage() {
 
     const requiredPractitioners = shortage.practitionerRequiredPerSegment || 0;
     const requiredOffice = shortage.officeRequiredPerSegment || 0;
-    const totalRequired = shortage.totalRequiredPerSegment || (requiredPractitioners + requiredOffice);
     const availablePractitioners = shortage.peakAvailablePractitionersPerSegment ?? 0;
     const availableOffice = shortage.peakAvailableOfficePerSegment ?? 0;
-    const totalAvailable = shortage.peakAvailableTotalPerSegment ?? (availablePractitioners + availableOffice);
-    const additionalTotal = shortage.totalAdditionalStaffNeeded || 0;
     const additionalPractitioners = shortage.additionalPractitionersNeeded || 0;
     const additionalOffice = shortage.additionalOfficeNeeded || 0;
-    const missingSlots = shortage.totalMissingPersonSlots || 0;
-    const segments = shortage.daySegments || 1;
+    const totalPracNeeded = requiredPractitioners + additionalPractitioners;
+    const totalOfficeNeeded = requiredOffice + additionalOffice;
 
-    return `Need ${totalRequired} staff per segment (${requiredPractitioners} practitioners + ${requiredOffice} office), but only ${totalAvailable} available at peak (${availablePractitioners} practitioners + ${availableOffice} office). Additional hires needed: ${additionalTotal} (${additionalPractitioners} practitioners + ${additionalOffice} office). Missing person-slots across rota: ${missingSlots} over ${segments} segment(s) per day.`;
+    const parts: string[] = [];
+    parts.push(`You need a total of ${totalPracNeeded} practitioners and ${totalOfficeNeeded} office staff.`);
+    parts.push(`Currently available: ${availablePractitioners} practitioners, ${availableOffice} office.`);
+    if (additionalPractitioners > 0 || additionalOffice > 0) {
+      const hires: string[] = [];
+      if (additionalPractitioners > 0) hires.push(`${additionalPractitioners} practitioner(s)`);
+      if (additionalOffice > 0) hires.push(`${additionalOffice} office staff`);
+      parts.push(`Hire ${hires.join(" and ")} to meet requirements.`);
+    }
+    return parts.join(" ");
   }
 
   async function handleGetConfig() {

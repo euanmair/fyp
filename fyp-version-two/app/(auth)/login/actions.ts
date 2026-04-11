@@ -213,6 +213,12 @@ export async function loginUser(formData: FormData) {
 }
 
 export async function registerUser(formData: FormData) {
+  const inviteCode = (formData.get('inviteCode') as string || '').trim();
+  const expectedCode = process.env.INVITE_CODE || '';
+  if (!inviteCode || inviteCode !== expectedCode) {
+    return { error: 'Invalid invitation code.' };
+  }
+
   const email = normaliseEmail(formData.get('email') as string);
   const password = formData.get('password') as string;
   const confirmPassword = formData.get('confirmPassword') as string;

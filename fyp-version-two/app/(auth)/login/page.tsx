@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [role, setRole] = useState<'staff' | 'manager' | 'admin'>('staff');
   const [organisationID, setOrganisationID] = useState('');
   const [staffID, setStaffID] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [error, setError] = useState(''); // Stores any error messages to display
   const [info, setInfo] = useState(''); // Stores non-error messages
   const [isLoading, setIsLoading] = useState(false); // Tracks if login request is in progress
@@ -33,6 +34,7 @@ export default function LoginPage() {
       formData.append('role', role);
       formData.append('organisationID', organisationID);
       formData.append('staffID', staffID);
+      formData.append('inviteCode', inviteCode);
 
       // Call the relevant server action with form data
       const result = mode === 'register' ? await registerUser(formData) : await loginUser(formData);
@@ -169,6 +171,22 @@ export default function LoginPage() {
                   <option value="manager">Manager</option>
                   <option value="admin">Admin</option>
                 </select>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="inviteCode" className="block text-sm font-medium">
+                  Invitation code
+                </label>
+                <input
+                  id="inviteCode"
+                  name="inviteCode"
+                  type="password"
+                  required
+                  className="w-full px-3 py-2 border border-foreground/20 rounded-md bg-background text-foreground placeholder:text-foreground/50 focus:outline-none focus:ring-2 focus:ring-foreground/30"
+                  placeholder="Enter your invitation code"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                />
               </div>
 
               <div className="space-y-2">

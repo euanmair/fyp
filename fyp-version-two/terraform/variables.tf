@@ -87,3 +87,9 @@ variable "jwt_secret_name" {
   type        = string
   default     = "nursery-app-jwt-secret"
 }
+
+variable "invite_code" {
+  description = "Invitation code required to register a new account"
+  type        = string
+  sensitive   = true
+}
