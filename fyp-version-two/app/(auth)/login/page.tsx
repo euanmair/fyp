@@ -221,14 +221,16 @@ export default function LoginPage() {
 
           {/* Error message display - only shows when error exists */}
           {error && (
-            <div className="p-3 rounded-md bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 text-sm">
-              {error}
+            <div className="flex items-start gap-2 p-4 rounded-md border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-sm font-medium">
+              <span className="shrink-0 mt-0.5">&#9888;</span>
+              <span>{error}</span>
             </div>
           )}
 
           {info && (
-            <div className="p-3 rounded-md bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200 text-sm">
-              {info}
+            <div className="flex items-start gap-2 p-4 rounded-md border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 text-sm font-medium">
+              <span className="shrink-0 mt-0.5">&#10003;</span>
+              <span>{info}</span>
             </div>
           )}
 
