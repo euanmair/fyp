@@ -140,21 +140,6 @@ export default function LoginPage() {
           {mode === 'register' && (
             <>
               <div className="space-y-2">
-                <label htmlFor="inviteCode" className="block text-sm font-medium">
-                  Invitation code
-                </label>
-                <input
-                  id="inviteCode"
-                  name="inviteCode"
-                  required
-                  className="w-full px-3 py-2 border border-foreground/20 rounded-md bg-background text-foreground placeholder:text-foreground/50 focus:outline-none focus:ring-2 focus:ring-foreground/30"
-                  placeholder="Enter your invitation code"
-                  value={inviteCode}
-                  onChange={(e) => setInviteCode(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
                 <label htmlFor="confirmPassword" className="block text-sm font-medium">
                   Confirm password
                 </label>
@@ -186,6 +171,21 @@ export default function LoginPage() {
                   <option value="manager">Manager</option>
                   <option value="admin">Admin</option>
                 </select>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="inviteCode" className="block text-sm font-medium">
+                  Invitation code
+                </label>
+                <input
+                  id="inviteCode"
+                  name="inviteCode"
+                  required
+                  className="w-full px-3 py-2 border border-foreground/20 rounded-md bg-background text-foreground placeholder:text-foreground/50 focus:outline-none focus:ring-2 focus:ring-foreground/30"
+                  placeholder="Enter your invitation code"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                />
               </div>
 
               <div className="space-y-2">
