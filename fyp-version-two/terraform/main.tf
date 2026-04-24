@@ -482,8 +482,7 @@ resource "aws_instance" "app_server" {
       JWT_SECRET_VALUE="your-secret-key-change-in-production"
     fi
 
-    # Create systemd service that points to this service. This will ensure the app starts on boot and restarts if it crashes.
-    # This is done by writing all text below into nodeapp.service, until the SERVICE tag.
+    # systemd service that points to this service. This will ensure the app starts on boot and restarts if it crashes.
     cat >/etc/systemd/system/nodeapp.service <<SERVICE
     [Unit]
     Description=Next.js Web Application
@@ -514,10 +513,6 @@ resource "aws_instance" "app_server" {
 
     # Set perms for app dir /opt/app/fyp-version-two
     chown ec2-user:ec2-user -R /opt/app/fyp-version-two
-    # chmod 644 -R /opt/app/fyp-version-two
-
-    # Deployments should be performed through CI/CD, not periodic force-reset jobs.
-    # rm -f /etc/cron.d/repo-sync
 
   EOF
 }
