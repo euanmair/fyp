@@ -6,7 +6,7 @@
 import { cookies } from 'next/headers';
 import bcrypt from 'bcryptjs';
 import { SignJWT } from 'jose';
-import { createHash, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { getSessionClaimsFromCookies, type AccountRole } from '@/lib/auth';
 
@@ -18,8 +18,6 @@ interface User {
   organisationID?: string;
   staffID?: string;
   createdAt?: string;
-  resetTokenHash?: string;
-  resetTokenExpiresAt?: string;
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
@@ -68,8 +66,6 @@ async function getUserByEmail(email: string): Promise<User | null> {
   const role = response.Item.role?.S;
   const organisationID = response.Item.organisationID?.S;
   const staffID = response.Item.staffID?.S;
-  const resetTokenHash = response.Item.resetTokenHash?.S;
-  const resetTokenExpiresAt = response.Item.resetTokenExpiresAt?.S;
 
   if (!id || !storedEmail || !passwordHash) {
     throw new Error('User record is malformed in DynamoDB.');
@@ -83,8 +79,6 @@ async function getUserByEmail(email: string): Promise<User | null> {
     organisationID,
     staffID,
     createdAt,
-    resetTokenHash,
-    resetTokenExpiresAt,
   };
 }
 
@@ -105,24 +99,12 @@ async function saveUser(user: User) {
     item.staffID = { S: user.staffID };
   }
 
-  if (user.resetTokenHash) {
-    item.resetTokenHash = { S: user.resetTokenHash };
-  }
-
-  if (user.resetTokenExpiresAt) {
-    item.resetTokenExpiresAt = { S: user.resetTokenExpiresAt };
-  }
-
   await dynamoClient.send(
     new PutItemCommand({
       TableName: USERS_TABLE_NAME,
       Item: item,
     })
   );
-}
-
-function hashResetToken(token: string) {
-  return createHash('sha256').update(token).digest('hex');
 }
 
 async function setAuthCookie(user: { id: string; email: string; role: AccountRole; organisationID?: string; staffID?: string }) {
@@ -282,98 +264,6 @@ export async function registerUser(formData: FormData) {
   } catch (error) {
     console.error('Registration error:', error);
     return { error: 'An error occurred during registration' };
-  }
-}
-
-export async function requestPasswordReset(formData: FormData) {
-  const email = normaliseEmail(formData.get('email') as string);
-
-  if (!email) {
-    return { error: 'Email is required' };
-  }
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return { error: 'Please enter a valid email address' };
-  }
-
-  try {
-    const user = await getUserByEmail(email);
-
-    // Avoid account enumeration: respond with success even if the account is not found.
-    if (!user) {
-      return { success: true, message: 'If the email exists, a reset code has been generated.' };
-    }
-
-    const resetToken = randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase();
-    const resetTokenHash = hashResetToken(resetToken);
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-
-    await saveUser({
-      ...user,
-      resetTokenHash,
-      resetTokenExpiresAt: expiresAt,
-    });
-
-    // In production, the token should be sent by email/SMS rather than returned.
-    const developmentCode = process.env.NODE_ENV !== 'production' ? resetToken : undefined;
-
-    return {
-      success: true,
-      message: 'If the email exists, a reset code has been generated.',
-      developmentCode,
-      expiresAt,
-    };
-  } catch (error) {
-    console.error('Request password reset error:', error);
-    return { error: 'Unable to start password reset flow' };
-  }
-}
-
-export async function resetPassword(formData: FormData) {
-  const email = normaliseEmail(formData.get('email') as string);
-  const code = String(formData.get('code') || '').trim().toUpperCase();
-  const newPassword = String(formData.get('newPassword') || '');
-  const confirmPassword = String(formData.get('confirmPassword') || '');
-
-  if (!email || !code || !newPassword || !confirmPassword) {
-    return { error: 'Email, reset code, new password and confirm password are required' };
-  }
-
-  if (newPassword.length < 8) {
-    return { error: 'Password must be at least 8 characters long' };
-  }
-
-  if (newPassword !== confirmPassword) {
-    return { error: 'Passwords do not match' };
-  }
-
-  try {
-    const user = await getUserByEmail(email);
-    if (!user || !user.resetTokenHash || !user.resetTokenExpiresAt) {
-      return { error: 'Invalid or expired reset code' };
-    }
-
-    const expiresAtMs = new Date(user.resetTokenExpiresAt).getTime();
-    if (!Number.isFinite(expiresAtMs) || Date.now() > expiresAtMs) {
-      return { error: 'Invalid or expired reset code' };
-    }
-
-    if (hashResetToken(code) !== user.resetTokenHash) {
-      return { error: 'Invalid or expired reset code' };
-    }
-
-    const passwordHash = await bcrypt.hash(newPassword, 12);
-    await saveUser({
-      ...user,
-      passwordHash,
-      resetTokenHash: undefined,
-      resetTokenExpiresAt: undefined,
-    });
-
-    return { success: true, message: 'Password updated successfully. You can now sign in.' };
-  } catch (error) {
-    console.error('Reset password error:', error);
-    return { error: 'Unable to reset password at this time' };
   }
 }
 

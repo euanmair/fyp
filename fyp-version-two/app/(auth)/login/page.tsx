@@ -170,24 +170,6 @@ export default function LoginPage() {
                   <option value="staff">Staff</option>
                   <option value="manager">Manager</option>
                   <option value="admin">Admin</option>
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label htmlFor="inviteCode" className="block text-sm font-medium">
-                  Invitation code
-                </label>
-                <input
-                  id="inviteCode"
-                  name="inviteCode"
-                  type="password"
-                  required
-                  className="w-full px-3 py-2 border border-foreground/20 rounded-md bg-background text-foreground placeholder:text-foreground/50 focus:outline-none focus:ring-2 focus:ring-foreground/30"
-                  placeholder="Enter your invitation code"
-                  value={inviteCode}
-                  onChange={(e) => setInviteCode(e.target.value)}
-                />
-              </div>
 
               <div className="space-y-2">
                 <label htmlFor="organisationID" className="block text-sm font-medium">
@@ -243,24 +225,6 @@ export default function LoginPage() {
             {/* Dynamic button text based on loading state */}
             {isLoading ? (mode === 'login' ? 'Signing in...' : 'Registering...') : (mode === 'login' ? 'Sign in' : 'Register')}
           </button>
-
-          {/* Forgot password link */}
-          <div className="text-center">
-            <a
-              href="/forgot-password" // Link to password reset page
-              className="text-sm text-foreground/60 hover:text-foreground"
-            >
-              Forgot your password?
-            </a>
-          </div>
-          <div className="text-center">
-            <a
-              href="/join-organisation"
-              className="text-sm text-foreground/60 hover:text-foreground"
-            >
-              Already registered? Join an organisation
-            </a>
-          </div>
         </form>
       </div>
     </div>
