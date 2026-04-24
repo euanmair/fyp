@@ -170,6 +170,7 @@ export default function LoginPage() {
                   <option value="staff">Staff</option>
                   <option value="manager">Manager</option>
                   <option value="admin">Admin</option>
+                </select>
 
               <div className="space-y-2">
                 <label htmlFor="organisationID" className="block text-sm font-medium">
