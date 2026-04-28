@@ -44,7 +44,7 @@ yarn-error.log*
 /fyp-version-two/terraform/lambda/events
 /fyp-version-two/terraform/lambda/*.zip
 /fyp-version-two/terraform/production.auto.tfvars
-
+*.tfstate
 
 # local env files
 .env*.local

@@ -6,7 +6,7 @@ variable "aws_region" {
 }
 
 variable "s3_bucket_name" {
-  description = "Define a unique S3 bucket name for schedule storage"
+  description = "Unique S3 bucket name"
   type        = string
   default     = "fyp-early-years-scheduler-2026"
 }
