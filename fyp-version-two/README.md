@@ -5,16 +5,22 @@
 3. RUN TERRAFORM APPLY
 4. ENSURE TERRAFORM DESTROY IS RAN AFTER USE
 
+# Site notes
+Holidays are formatted as following:
+recurring (every week) - "monday", "friday"
 
-
-
+Week specific:
+"w1-monday", "w3-thursday"
 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-See env tokens below
+Set env variables (windows)
 $env:AWS_DEFAULT_REGION=""
 $env:AWS_ACCESS_KEY_ID=""
 $env:AWS_SECRET_ACCESS_KEY=""
+
+Set env variables (mac)
+the above just without $env:
 
 ## Local app environment
 

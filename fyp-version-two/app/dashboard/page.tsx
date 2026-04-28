@@ -399,11 +399,9 @@ export default function DashboardPage() {
     const availableOffice = shortage.peakAvailableOfficePerSegment ?? 0;
     const additionalPractitioners = shortage.additionalPractitionersNeeded || 0;
     const additionalOffice = shortage.additionalOfficeNeeded || 0;
-    const totalPracNeeded = requiredPractitioners + additionalPractitioners;
-    const totalOfficeNeeded = requiredOffice + additionalOffice;
 
     const parts: string[] = [];
-    parts.push(`You need a total of ${totalPracNeeded} practitioners and ${totalOfficeNeeded} office staff.`);
+    parts.push(`You need ${requiredPractitioners} practitioners and ${requiredOffice} office staff per segment.`);
     parts.push(`Currently available: ${availablePractitioners} practitioners, ${availableOffice} office.`);
     if (additionalPractitioners > 0 || additionalOffice > 0) {
       const hires: string[] = [];
@@ -466,9 +464,15 @@ export default function DashboardPage() {
     } catch (err) {
       if (err && typeof err === "object" && "shortage" in err) {
         const shortage = (err as { shortage?: ShortageSummary }).shortage;
-        setShortageMessage(formatShortageMessage(shortage));
+        const msg = formatShortageMessage(shortage);
+        if (msg) {
+          setShortageMessage(msg);
+        } else {
+          setError(err instanceof Error ? err.message : "Unexpected error");
+        }
+      } else {
+        setError(err instanceof Error ? err.message : "Unexpected error");
       }
-      setError(err instanceof Error ? err.message : "Unexpected error");
     } finally {
       setIsLoading(false);
     }
